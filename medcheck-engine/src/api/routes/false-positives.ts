@@ -1,7 +1,6 @@
 /**
- * 오탐 관리 API 라우트
- * /v1/false-positives - 오탐 케이스 관리
- * /v1/patterns/:id/exceptions - 패턴 예외 규칙 관리
+ * 오탐 관리 API 라우트 (Phase 5 확장)
+ * 설계서 기반 구현
  */
 
 import { Hono } from 'hono';
@@ -17,73 +16,26 @@ export interface Env {
 }
 
 /**
- * 오탐 사유 타입
+ * 오탐 유형
  */
-export type FalsePositiveReason =
-  | 'medical_term'      // 의학 용어
-  | 'context_dependent' // 문맥 의존적
-  | 'proper_noun'       // 고유명사
-  | 'quotation'         // 인용문
-  | 'other';            // 기타
+export type FalsePositiveType =
+  | 'context_dependent'  // 맥락 의존적
+  | 'domain_specific'    // 특정 진료과 용어
+  | 'quotation'          // 인용/참조 문맥
+  | 'negation'           // 부정 문맥
+  | 'education'          // 교육/안내 문맥
+  | 'pattern_too_broad'  // 패턴이 너무 넓음
+  | 'ocr_error';         // OCR 오류
 
 /**
- * 오탐 케이스 상태
+ * 오탐 상태
  */
-export type FPCaseStatus = 'pending' | 'confirmed' | 'rejected' | 'applied';
+export type FPStatus = 'reported' | 'reviewing' | 'resolved' | 'rejected';
 
 /**
  * 예외 타입
  */
-export type ExceptionType = 'exact_match' | 'contains' | 'regex' | 'context';
-
-/**
- * 오탐 케이스 레코드
- */
-export interface FalsePositiveCase {
-  id: string;
-  patternId: string;
-  patternName: string | null;
-  matchedText: string;
-  fullContext: string | null;
-  reason: FalsePositiveReason;
-  reasonDetail: string | null;
-  sourceUrl: string | null;
-  sourceType: string | null;
-  status: FPCaseStatus;
-  reportedBy: string | null;
-  reviewedBy: string | null;
-  reviewedAt: string | null;
-  reviewComment: string | null;
-  appliedToException: boolean;
-  exceptionId: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * 패턴 예외 규칙 레코드
- */
-export interface PatternException {
-  id: string;
-  patternId: string;
-  exceptionType: ExceptionType;
-  exceptionValue: string;
-  contextBefore: string | null;
-  contextAfter: string | null;
-  reason: string;
-  scope: string;
-  scopeValue: string | null;
-  isActive: boolean;
-  priority: number;
-  sourceCaseId: string | null;
-  createdBy: string | null;
-  approvedBy: string | null;
-  approvedAt: string | null;
-  appliedCount: number;
-  lastAppliedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-}
+export type ExceptionType = 'keyword' | 'regex' | 'context' | 'domain';
 
 // ============================================
 // 오탐 케이스 라우트
@@ -92,13 +44,14 @@ export interface PatternException {
 const falsePositivesRoutes = new Hono<{ Bindings: Env }>();
 
 /**
- * GET /v1/false-positives - 오탐 케이스 목록 조회
+ * GET /v1/false-positives - 오탐 목록 조회
  */
 falsePositivesRoutes.get('/', async (c) => {
   const page = parseInt(c.req.query('page') || '1');
   const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
-  const status = c.req.query('status') as FPCaseStatus | undefined;
-  const patternId = c.req.query('patternId');
+  const status = c.req.query('status') as FPStatus | undefined;
+  const patternId = c.req.query('pattern_id');
+  const fpType = c.req.query('type') as FalsePositiveType | undefined;
   const offset = (page - 1) * limit;
 
   try {
@@ -109,33 +62,23 @@ falsePositivesRoutes.get('/', async (c) => {
       whereClause += ' AND status = ?';
       params.push(status);
     }
-
     if (patternId) {
       whereClause += ' AND pattern_id = ?';
       params.push(patternId);
     }
+    if (fpType) {
+      whereClause += ' AND false_positive_type = ?';
+      params.push(fpType);
+    }
 
-    // 전체 개수
     const countResult = await c.env.DB.prepare(
       `SELECT COUNT(*) as total FROM false_positive_cases ${whereClause}`
     ).bind(...params).first<{ total: number }>();
 
     const total = countResult?.total || 0;
 
-    // 데이터 조회
     const results = await c.env.DB.prepare(
-      `SELECT
-        id, pattern_id as patternId, pattern_name as patternName,
-        matched_text as matchedText, full_context as fullContext,
-        reason, reason_detail as reasonDetail,
-        source_url as sourceUrl, source_type as sourceType,
-        status, reported_by as reportedBy,
-        reviewed_by as reviewedBy, reviewed_at as reviewedAt,
-        review_comment as reviewComment,
-        applied_to_exception as appliedToException,
-        exception_id as exceptionId,
-        created_at as createdAt, updated_at as updatedAt
-      FROM false_positive_cases
+      `SELECT * FROM false_positive_cases
       ${whereClause}
       ORDER BY created_at DESC
       LIMIT ? OFFSET ?`
@@ -148,42 +91,37 @@ falsePositivesRoutes.get('/', async (c) => {
     });
   } catch (error) {
     const err = error as Error;
-    return c.json({
-      success: false,
-      error: { code: 'DATABASE_ERROR', message: err.message },
-    }, 500);
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
   }
 });
 
 /**
- * POST /v1/false-positives - 오탐 케이스 등록
+ * POST /v1/false-positives - 오탐 신고
  */
 falsePositivesRoutes.post('/', async (c) => {
   let body: {
+    analysisId?: string;
     patternId: string;
-    patternName?: string;
     matchedText: string;
     fullContext?: string;
-    reason: FalsePositiveReason;
-    reasonDetail?: string;
     sourceUrl?: string;
-    sourceType?: string;
-    reportedBy?: string;
+    feedbackId?: string;
+    reporterType?: string;
+    reportReason?: string;
+    falsePositiveType?: FalsePositiveType;
+    suggestedAction?: string;
   };
 
   try {
     body = await c.req.json();
   } catch (e) {
-    return c.json({
-      success: false,
-      error: { code: 'PARSE_ERROR', message: 'Invalid JSON' },
-    }, 400);
+    return c.json({ success: false, error: { code: 'PARSE_ERROR', message: 'Invalid JSON' } }, 400);
   }
 
-  if (!body.patternId || !body.matchedText || !body.reason) {
+  if (!body.patternId || !body.matchedText) {
     return c.json({
       success: false,
-      error: { code: 'INVALID_INPUT', message: 'patternId, matchedText, reason은 필수입니다.' },
+      error: { code: 'INVALID_INPUT', message: 'patternId, matchedText는 필수입니다.' },
     }, 400);
   }
 
@@ -193,91 +131,284 @@ falsePositivesRoutes.post('/', async (c) => {
 
     await c.env.DB.prepare(
       `INSERT INTO false_positive_cases (
-        id, pattern_id, pattern_name, matched_text, full_context,
-        reason, reason_detail, source_url, source_type,
-        status, reported_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+        id, analysis_id, pattern_id, matched_text, full_context, source_url,
+        feedback_id, reporter_type, report_reason,
+        false_positive_type, suggested_action, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'reported', ?)`
     ).bind(
       id,
+      body.analysisId || null,
       body.patternId,
-      body.patternName || null,
       body.matchedText,
       body.fullContext || null,
-      body.reason,
-      body.reasonDetail || null,
       body.sourceUrl || null,
-      body.sourceType || null,
-      body.reportedBy || null,
-      now,
+      body.feedbackId || null,
+      body.reporterType || 'user',
+      body.reportReason || null,
+      body.falsePositiveType || null,
+      body.suggestedAction || null,
       now
     ).run();
 
     return c.json({
       success: true,
-      data: {
-        id,
-        patternId: body.patternId,
-        matchedText: body.matchedText,
-        reason: body.reason,
-        status: 'pending',
-        createdAt: now,
-      },
+      data: { id, patternId: body.patternId, status: 'reported', createdAt: now },
     }, 201);
   } catch (error) {
     const err = error as Error;
-    return c.json({
-      success: false,
-      error: { code: 'DATABASE_ERROR', message: err.message },
-    }, 500);
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
   }
 });
 
 /**
- * GET /v1/false-positives/:id - 오탐 케이스 상세 조회
+ * GET /v1/false-positives/:id - 오탐 상세 조회
  */
 falsePositivesRoutes.get('/:id', async (c) => {
   const id = c.req.param('id');
 
   try {
     const result = await c.env.DB.prepare(
-      `SELECT
-        id, pattern_id as patternId, pattern_name as patternName,
-        matched_text as matchedText, full_context as fullContext,
-        reason, reason_detail as reasonDetail,
-        source_url as sourceUrl, source_type as sourceType,
-        status, reported_by as reportedBy,
-        reviewed_by as reviewedBy, reviewed_at as reviewedAt,
-        review_comment as reviewComment,
-        applied_to_exception as appliedToException,
-        exception_id as exceptionId,
-        created_at as createdAt, updated_at as updatedAt
-      FROM false_positive_cases WHERE id = ?`
+      `SELECT * FROM false_positive_cases WHERE id = ?`
     ).bind(id).first();
 
     if (!result) {
-      return c.json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: '오탐 케이스를 찾을 수 없습니다.' },
-      }, 404);
+      return c.json({ success: false, error: { code: 'NOT_FOUND', message: '오탐 케이스를 찾을 수 없습니다.' } }, 404);
     }
 
     return c.json({ success: true, data: result });
   } catch (error) {
     const err = error as Error;
-    return c.json({
-      success: false,
-      error: { code: 'DATABASE_ERROR', message: err.message },
-    }, 500);
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
   }
 });
 
 /**
- * POST /v1/false-positives/:id/confirm - 오탐 확정
+ * PATCH /v1/false-positives/:id - 상태 변경
  */
-falsePositivesRoutes.post('/:id/confirm', async (c) => {
+falsePositivesRoutes.patch('/:id', async (c) => {
   const id = c.req.param('id');
 
-  let body: { reviewedBy?: string; reviewComment?: string; createException?: boolean } = {};
+  let body: {
+    status?: FPStatus;
+    resolution?: string;
+    resolutionNote?: string;
+    reviewer?: string;
+    falsePositiveType?: FalsePositiveType;
+  };
+
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return c.json({ success: false, error: { code: 'PARSE_ERROR', message: 'Invalid JSON' } }, 400);
+  }
+
+  try {
+    const now = new Date().toISOString();
+    const updates: string[] = [];
+    const params: (string | null)[] = [];
+
+    if (body.status) {
+      updates.push('status = ?');
+      params.push(body.status);
+
+      if (body.status === 'reviewing') {
+        updates.push('reviewed_at = ?');
+        params.push(now);
+      } else if (body.status === 'resolved' || body.status === 'rejected') {
+        updates.push('resolved_at = ?');
+        params.push(now);
+      }
+    }
+    if (body.resolution) {
+      updates.push('resolution = ?');
+      params.push(body.resolution);
+    }
+    if (body.resolutionNote) {
+      updates.push('resolution_note = ?');
+      params.push(body.resolutionNote);
+    }
+    if (body.reviewer) {
+      updates.push('reviewer = ?');
+      params.push(body.reviewer);
+    }
+    if (body.falsePositiveType) {
+      updates.push('false_positive_type = ?');
+      params.push(body.falsePositiveType);
+    }
+
+    if (updates.length === 0) {
+      return c.json({ success: false, error: { code: 'INVALID_INPUT', message: '변경할 필드가 없습니다.' } }, 400);
+    }
+
+    params.push(id);
+
+    await c.env.DB.prepare(
+      `UPDATE false_positive_cases SET ${updates.join(', ')} WHERE id = ?`
+    ).bind(...params).run();
+
+    const result = await c.env.DB.prepare(
+      `SELECT * FROM false_positive_cases WHERE id = ?`
+    ).bind(id).first();
+
+    return c.json({ success: true, data: result });
+  } catch (error) {
+    const err = error as Error;
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
+  }
+});
+
+// ============================================
+// 예외 규칙 라우트
+// ============================================
+
+const patternExceptionsRoutes = new Hono<{ Bindings: Env }>();
+
+/**
+ * GET /v1/patterns/:patternId/exceptions - 패턴 예외 목록
+ */
+patternExceptionsRoutes.get('/', async (c) => {
+  const patternId = c.req.param('patternId');
+  const status = c.req.query('status') || 'active';
+
+  try {
+    const results = await c.env.DB.prepare(
+      `SELECT * FROM pattern_exceptions
+      WHERE pattern_id = ? AND status = ?
+      ORDER BY created_at DESC`
+    ).bind(patternId, status).all();
+
+    return c.json({ success: true, data: results.results || [] });
+  } catch (error) {
+    const err = error as Error;
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
+  }
+});
+
+/**
+ * POST /v1/patterns/:patternId/exceptions - 예외 추가
+ */
+patternExceptionsRoutes.post('/', async (c) => {
+  const patternId = c.req.param('patternId');
+
+  let body: {
+    exceptionType: ExceptionType;
+    exceptionValue: string;
+    sourceType?: string;
+    sourceId?: string;
+    createdBy?: string;
+    version?: string;
+  };
+
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return c.json({ success: false, error: { code: 'PARSE_ERROR', message: 'Invalid JSON' } }, 400);
+  }
+
+  if (!body.exceptionType || !body.exceptionValue) {
+    return c.json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'exceptionType, exceptionValue는 필수입니다.' },
+    }, 400);
+  }
+
+  try {
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+
+    await c.env.DB.prepare(
+      `INSERT INTO pattern_exceptions (
+        id, pattern_id, exception_type, exception_value,
+        source_type, source_id, status, created_at, created_by, version
+      ) VALUES (?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)`
+    ).bind(
+      id,
+      patternId,
+      body.exceptionType,
+      body.exceptionValue,
+      body.sourceType || null,
+      body.sourceId || null,
+      now,
+      body.createdBy || null,
+      body.version || null
+    ).run();
+
+    return c.json({
+      success: true,
+      data: { id, patternId, exceptionType: body.exceptionType, status: 'active', createdAt: now },
+    }, 201);
+  } catch (error) {
+    const err = error as Error;
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
+  }
+});
+
+/**
+ * DELETE /v1/patterns/:patternId/exceptions/:eid - 예외 제거 (비활성화)
+ */
+patternExceptionsRoutes.delete('/:eid', async (c) => {
+  const patternId = c.req.param('patternId');
+  const eid = c.req.param('eid');
+
+  try {
+    await c.env.DB.prepare(
+      `UPDATE pattern_exceptions SET status = 'deprecated' WHERE id = ? AND pattern_id = ?`
+    ).bind(eid, patternId).run();
+
+    return c.json({ success: true, data: { id: eid, status: 'deprecated' } });
+  } catch (error) {
+    const err = error as Error;
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
+  }
+});
+
+// ============================================
+// 예외 제안 라우트
+// ============================================
+
+const exceptionSuggestionsRoutes = new Hono<{ Bindings: Env }>();
+
+/**
+ * GET /v1/exception-suggestions - 자동 제안 목록
+ */
+exceptionSuggestionsRoutes.get('/', async (c) => {
+  const status = c.req.query('status') || 'suggested';
+  const page = parseInt(c.req.query('page') || '1');
+  const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
+  const offset = (page - 1) * limit;
+
+  try {
+    const countResult = await c.env.DB.prepare(
+      `SELECT COUNT(*) as total FROM exception_suggestions WHERE status = ?`
+    ).bind(status).first<{ total: number }>();
+
+    const total = countResult?.total || 0;
+
+    const results = await c.env.DB.prepare(
+      `SELECT * FROM exception_suggestions
+      WHERE status = ?
+      ORDER BY confidence DESC, fp_count DESC
+      LIMIT ? OFFSET ?`
+    ).bind(status, limit, offset).all();
+
+    return c.json({
+      success: true,
+      data: results.results || [],
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    });
+  } catch (error) {
+    const err = error as Error;
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
+  }
+});
+
+/**
+ * POST /v1/exception-suggestions/:id/approve - 제안 승인
+ */
+exceptionSuggestionsRoutes.post('/:id/approve', async (c) => {
+  const id = c.req.param('id');
+
+  let body: { reviewedBy?: string; reviewComment?: string } = {};
   try {
     const text = await c.req.text();
     if (text) body = JSON.parse(text);
@@ -286,83 +417,66 @@ falsePositivesRoutes.post('/:id/confirm', async (c) => {
   try {
     const now = new Date().toISOString();
 
-    // 케이스 확인
-    const existing = await c.env.DB.prepare(
-      `SELECT id, status, pattern_id, matched_text, reason FROM false_positive_cases WHERE id = ?`
-    ).bind(id).first<{ id: string; status: string; pattern_id: string; matched_text: string; reason: string }>();
+    // 제안 조회
+    const suggestion = await c.env.DB.prepare(
+      `SELECT * FROM exception_suggestions WHERE id = ?`
+    ).bind(id).first<{
+      id: string;
+      pattern_id: string;
+      exception_type: string;
+      exception_value: string;
+      status: string;
+    }>();
 
-    if (!existing) {
-      return c.json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: '오탐 케이스를 찾을 수 없습니다.' },
-      }, 404);
+    if (!suggestion) {
+      return c.json({ success: false, error: { code: 'NOT_FOUND', message: '제안을 찾을 수 없습니다.' } }, 404);
     }
 
-    let exceptionId: string | null = null;
-
-    // 예외 규칙 자동 생성 옵션
-    if (body.createException) {
-      exceptionId = crypto.randomUUID();
-
-      await c.env.DB.prepare(
-        `INSERT INTO pattern_exceptions (
-          id, pattern_id, exception_type, exception_value, reason,
-          scope, is_active, priority, source_case_id, created_at, updated_at
-        ) VALUES (?, ?, 'exact_match', ?, ?, 'global', 1, 0, ?, ?, ?)`
-      ).bind(
-        exceptionId,
-        existing.pattern_id,
-        existing.matched_text,
-        existing.reason,
-        id,
-        now,
-        now
-      ).run();
+    if (suggestion.status !== 'suggested') {
+      return c.json({ success: false, error: { code: 'INVALID_STATE', message: '이미 처리된 제안입니다.' } }, 400);
     }
 
-    // 케이스 상태 업데이트
+    // 예외 규칙 생성
+    const exceptionId = crypto.randomUUID();
     await c.env.DB.prepare(
-      `UPDATE false_positive_cases
-      SET status = 'confirmed',
+      `INSERT INTO pattern_exceptions (
+        id, pattern_id, exception_type, exception_value,
+        source_type, source_id, status, created_at
+      ) VALUES (?, ?, ?, ?, 'auto', ?, 'active', ?)`
+    ).bind(
+      exceptionId,
+      suggestion.pattern_id,
+      suggestion.exception_type,
+      suggestion.exception_value,
+      id,
+      now
+    ).run();
+
+    // 제안 상태 업데이트
+    await c.env.DB.prepare(
+      `UPDATE exception_suggestions
+      SET status = 'approved',
           reviewed_by = ?,
           reviewed_at = ?,
           review_comment = ?,
-          applied_to_exception = ?,
-          exception_id = ?,
-          updated_at = ?
+          created_exception_id = ?
       WHERE id = ?`
-    ).bind(
-      body.reviewedBy || null,
-      now,
-      body.reviewComment || null,
-      body.createException ? 1 : 0,
-      exceptionId,
-      now,
-      id
-    ).run();
+    ).bind(body.reviewedBy || null, now, body.reviewComment || null, exceptionId, id).run();
 
     return c.json({
       success: true,
-      data: {
-        id,
-        status: 'confirmed',
-        exceptionId,
-        reviewedAt: now,
-      },
+      data: { suggestionId: id, status: 'approved', createdExceptionId: exceptionId },
     });
   } catch (error) {
     const err = error as Error;
-    return c.json({
-      success: false,
-      error: { code: 'DATABASE_ERROR', message: err.message },
-    }, 500);
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
   }
 });
 
 /**
- * POST /v1/false-positives/:id/reject - 오탐 거절
+ * POST /v1/exception-suggestions/:id/reject - 제안 거절
  */
-falsePositivesRoutes.post('/:id/reject', async (c) => {
+exceptionSuggestionsRoutes.post('/:id/reject', async (c) => {
   const id = c.req.param('id');
 
   let body: { reviewedBy?: string; reviewComment?: string } = {};
@@ -375,156 +489,77 @@ falsePositivesRoutes.post('/:id/reject', async (c) => {
     const now = new Date().toISOString();
 
     await c.env.DB.prepare(
-      `UPDATE false_positive_cases
+      `UPDATE exception_suggestions
       SET status = 'rejected',
           reviewed_by = ?,
           reviewed_at = ?,
-          review_comment = ?,
-          updated_at = ?
+          review_comment = ?
       WHERE id = ?`
-    ).bind(
-      body.reviewedBy || null,
-      now,
-      body.reviewComment || '거절됨',
-      now,
-      id
-    ).run();
+    ).bind(body.reviewedBy || null, now, body.reviewComment || '거절됨', id).run();
 
-    return c.json({
-      success: true,
-      data: { id, status: 'rejected', reviewedAt: now },
-    });
+    return c.json({ success: true, data: { id, status: 'rejected' } });
   } catch (error) {
     const err = error as Error;
-    return c.json({
-      success: false,
-      error: { code: 'DATABASE_ERROR', message: err.message },
-    }, 500);
-  }
-});
-
-/**
- * GET /v1/false-positives/stats - 오탐 통계
- */
-falsePositivesRoutes.get('/stats/summary', async (c) => {
-  try {
-    const stats = await c.env.DB.prepare(`
-      SELECT status, COUNT(*) as count
-      FROM false_positive_cases
-      GROUP BY status
-    `).all<{ status: string; count: number }>();
-
-    const byReason = await c.env.DB.prepare(`
-      SELECT reason, COUNT(*) as count
-      FROM false_positive_cases
-      GROUP BY reason
-    `).all<{ reason: string; count: number }>();
-
-    const statusMap: Record<string, number> = {};
-    const reasonMap: Record<string, number> = {};
-
-    (stats.results || []).forEach(r => { statusMap[r.status] = r.count; });
-    (byReason.results || []).forEach(r => { reasonMap[r.reason] = r.count; });
-
-    return c.json({
-      success: true,
-      data: {
-        byStatus: statusMap,
-        byReason: reasonMap,
-        total: Object.values(statusMap).reduce((a, b) => a + b, 0),
-      },
-    });
-  } catch (error) {
-    const err = error as Error;
-    return c.json({
-      success: false,
-      error: { code: 'DATABASE_ERROR', message: err.message },
-    }, 500);
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
   }
 });
 
 // ============================================
-// 패턴 예외 라우트
+// 패턴 버전 라우트
 // ============================================
 
-const patternExceptionsRoutes = new Hono<{ Bindings: Env }>();
+const patternVersionsRoutes = new Hono<{ Bindings: Env }>();
 
 /**
- * GET /v1/patterns/:patternId/exceptions - 패턴별 예외 목록
+ * GET /v1/patterns/:patternId/versions - 버전 이력
  */
-patternExceptionsRoutes.get('/', async (c) => {
+patternVersionsRoutes.get('/', async (c) => {
   const patternId = c.req.param('patternId');
-  const activeOnly = c.req.query('active') !== 'false';
 
   try {
-    let whereClause = 'WHERE pattern_id = ?';
-    const params: (string | number)[] = [patternId];
-
-    if (activeOnly) {
-      whereClause += ' AND is_active = 1';
-    }
-
     const results = await c.env.DB.prepare(
-      `SELECT
-        id, pattern_id as patternId,
-        exception_type as exceptionType, exception_value as exceptionValue,
-        context_before as contextBefore, context_after as contextAfter,
-        reason, scope, scope_value as scopeValue,
-        is_active as isActive, priority,
-        source_case_id as sourceCaseId,
-        created_by as createdBy, approved_by as approvedBy,
-        approved_at as approvedAt,
-        applied_count as appliedCount, last_applied_at as lastAppliedAt,
-        created_at as createdAt, updated_at as updatedAt
-      FROM pattern_exceptions
-      ${whereClause}
-      ORDER BY priority DESC, created_at DESC`
-    ).bind(...params).all();
+      `SELECT * FROM pattern_versions
+      WHERE pattern_id = ?
+      ORDER BY created_at DESC`
+    ).bind(patternId).all();
 
-    return c.json({
-      success: true,
-      data: results.results || [],
-    });
+    return c.json({ success: true, data: results.results || [] });
   } catch (error) {
     const err = error as Error;
-    return c.json({
-      success: false,
-      error: { code: 'DATABASE_ERROR', message: err.message },
-    }, 500);
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
   }
 });
 
 /**
- * POST /v1/patterns/:patternId/exceptions - 예외 규칙 추가
+ * POST /v1/patterns/:patternId/versions - 새 버전 생성
  */
-patternExceptionsRoutes.post('/', async (c) => {
+patternVersionsRoutes.post('/', async (c) => {
   const patternId = c.req.param('patternId');
 
   let body: {
-    exceptionType: ExceptionType;
-    exceptionValue: string;
-    contextBefore?: string;
-    contextAfter?: string;
-    reason: string;
-    scope?: string;
-    scopeValue?: string;
-    priority?: number;
+    version: string;
+    changeType: string;
+    changeDescription: string;
+    changeReason?: string;
+    previousPattern?: string;
+    newPattern?: string;
+    previousThreshold?: number;
+    newThreshold?: number;
+    relatedFeedbackIds?: string[];
+    relatedFpCaseIds?: string[];
     createdBy?: string;
   };
 
   try {
     body = await c.req.json();
   } catch (e) {
-    return c.json({
-      success: false,
-      error: { code: 'PARSE_ERROR', message: 'Invalid JSON' },
-    }, 400);
+    return c.json({ success: false, error: { code: 'PARSE_ERROR', message: 'Invalid JSON' } }, 400);
   }
 
-  if (!body.exceptionType || !body.exceptionValue || !body.reason) {
+  if (!body.version || !body.changeType || !body.changeDescription) {
     return c.json({
       success: false,
-      error: { code: 'INVALID_INPUT', message: 'exceptionType, exceptionValue, reason은 필수입니다.' },
+      error: { code: 'INVALID_INPUT', message: 'version, changeType, changeDescription은 필수입니다.' },
     }, 400);
   }
 
@@ -533,26 +568,134 @@ patternExceptionsRoutes.post('/', async (c) => {
     const now = new Date().toISOString();
 
     await c.env.DB.prepare(
-      `INSERT INTO pattern_exceptions (
-        id, pattern_id, exception_type, exception_value,
-        context_before, context_after, reason,
-        scope, scope_value, is_active, priority,
-        created_by, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)`
+      `INSERT INTO pattern_versions (
+        id, pattern_id, version, change_type, change_description, change_reason,
+        previous_pattern, new_pattern, previous_threshold, new_threshold,
+        related_feedback_ids, related_fp_case_ids, created_at, created_by
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).bind(
       id,
       patternId,
-      body.exceptionType,
-      body.exceptionValue,
-      body.contextBefore || null,
-      body.contextAfter || null,
-      body.reason,
-      body.scope || 'global',
-      body.scopeValue || null,
-      body.priority || 0,
-      body.createdBy || null,
+      body.version,
+      body.changeType,
+      body.changeDescription,
+      body.changeReason || null,
+      body.previousPattern || null,
+      body.newPattern || null,
+      body.previousThreshold || null,
+      body.newThreshold || null,
+      body.relatedFeedbackIds ? JSON.stringify(body.relatedFeedbackIds) : null,
+      body.relatedFpCaseIds ? JSON.stringify(body.relatedFpCaseIds) : null,
       now,
-      now
+      body.createdBy || null
+    ).run();
+
+    return c.json({
+      success: true,
+      data: { id, patternId, version: body.version, changeType: body.changeType, createdAt: now },
+    }, 201);
+  } catch (error) {
+    const err = error as Error;
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
+  }
+});
+
+/**
+ * GET /v1/patterns/:patternId/versions/:version/compare - 버전 비교
+ */
+patternVersionsRoutes.get('/:version/compare', async (c) => {
+  const patternId = c.req.param('patternId');
+  const version = c.req.param('version');
+  const compareWith = c.req.query('with');
+
+  try {
+    const current = await c.env.DB.prepare(
+      `SELECT * FROM pattern_versions WHERE pattern_id = ? AND version = ?`
+    ).bind(patternId, version).first();
+
+    if (!current) {
+      return c.json({ success: false, error: { code: 'NOT_FOUND', message: '버전을 찾을 수 없습니다.' } }, 404);
+    }
+
+    let comparison = null;
+    if (compareWith) {
+      comparison = await c.env.DB.prepare(
+        `SELECT * FROM pattern_versions WHERE pattern_id = ? AND version = ?`
+      ).bind(patternId, compareWith).first();
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        current,
+        comparison,
+        diff: comparison ? {
+          patternChanged: current.new_pattern !== comparison.new_pattern,
+          thresholdChanged: current.new_threshold !== comparison.new_threshold,
+        } : null,
+      },
+    });
+  } catch (error) {
+    const err = error as Error;
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
+  }
+});
+
+/**
+ * POST /v1/patterns/:patternId/rollback/:version - 롤백
+ */
+patternVersionsRoutes.post('/rollback/:version', async (c) => {
+  const patternId = c.req.param('patternId');
+  const version = c.req.param('version');
+
+  let body: { createdBy?: string; reason?: string } = {};
+  try {
+    const text = await c.req.text();
+    if (text) body = JSON.parse(text);
+  } catch (e) {}
+
+  try {
+    // 롤백 대상 버전 조회
+    const targetVersion = await c.env.DB.prepare(
+      `SELECT * FROM pattern_versions WHERE pattern_id = ? AND version = ?`
+    ).bind(patternId, version).first<{ new_pattern: string; new_threshold: number }>();
+
+    if (!targetVersion) {
+      return c.json({ success: false, error: { code: 'NOT_FOUND', message: '버전을 찾을 수 없습니다.' } }, 404);
+    }
+
+    // 현재 최신 버전 조회
+    const latestVersion = await c.env.DB.prepare(
+      `SELECT version, new_pattern, new_threshold FROM pattern_versions
+      WHERE pattern_id = ?
+      ORDER BY created_at DESC LIMIT 1`
+    ).bind(patternId).first<{ version: string; new_pattern: string; new_threshold: number }>();
+
+    // 롤백 버전 생성
+    const id = crypto.randomUUID();
+    const now = new Date().toISOString();
+    const newVersionNum = latestVersion
+      ? (parseFloat(latestVersion.version) + 0.1).toFixed(1)
+      : '1.0';
+
+    await c.env.DB.prepare(
+      `INSERT INTO pattern_versions (
+        id, pattern_id, version, change_type, change_description, change_reason,
+        previous_pattern, new_pattern, previous_threshold, new_threshold,
+        created_at, created_by
+      ) VALUES (?, ?, ?, 'rollback', ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(
+      id,
+      patternId,
+      newVersionNum,
+      `버전 ${version}으로 롤백`,
+      body.reason || null,
+      latestVersion?.new_pattern || null,
+      targetVersion.new_pattern,
+      latestVersion?.new_threshold || null,
+      targetVersion.new_threshold,
+      now,
+      body.createdBy || null
     ).run();
 
     return c.json({
@@ -560,86 +703,42 @@ patternExceptionsRoutes.post('/', async (c) => {
       data: {
         id,
         patternId,
-        exceptionType: body.exceptionType,
-        exceptionValue: body.exceptionValue,
-        reason: body.reason,
-        isActive: true,
+        newVersion: newVersionNum,
+        rolledBackTo: version,
         createdAt: now,
       },
-    }, 201);
-  } catch (error) {
-    const err = error as Error;
-    return c.json({
-      success: false,
-      error: { code: 'DATABASE_ERROR', message: err.message },
-    }, 500);
-  }
-});
-
-/**
- * DELETE /v1/patterns/:patternId/exceptions/:exceptionId - 예외 규칙 비활성화
- */
-patternExceptionsRoutes.delete('/:exceptionId', async (c) => {
-  const patternId = c.req.param('patternId');
-  const exceptionId = c.req.param('exceptionId');
-
-  try {
-    const now = new Date().toISOString();
-
-    await c.env.DB.prepare(
-      `UPDATE pattern_exceptions
-      SET is_active = 0, updated_at = ?
-      WHERE id = ? AND pattern_id = ?`
-    ).bind(now, exceptionId, patternId).run();
-
-    return c.json({
-      success: true,
-      data: { id: exceptionId, isActive: false },
     });
   } catch (error) {
     const err = error as Error;
-    return c.json({
-      success: false,
-      error: { code: 'DATABASE_ERROR', message: err.message },
-    }, 500);
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
   }
 });
 
-/**
- * GET /v1/exceptions - 전체 예외 규칙 목록
- */
+// ============================================
+// 전체 예외 라우트
+// ============================================
+
 const allExceptionsRoutes = new Hono<{ Bindings: Env }>();
 
 allExceptionsRoutes.get('/', async (c) => {
   const page = parseInt(c.req.query('page') || '1');
   const limit = Math.min(parseInt(c.req.query('limit') || '50'), 100);
-  const activeOnly = c.req.query('active') !== 'false';
+  const status = c.req.query('status') || 'active';
   const offset = (page - 1) * limit;
 
   try {
-    let whereClause = 'WHERE 1=1';
-    if (activeOnly) {
-      whereClause += ' AND is_active = 1';
-    }
-
     const countResult = await c.env.DB.prepare(
-      `SELECT COUNT(*) as total FROM pattern_exceptions ${whereClause}`
-    ).first<{ total: number }>();
+      `SELECT COUNT(*) as total FROM pattern_exceptions WHERE status = ?`
+    ).bind(status).first<{ total: number }>();
 
     const total = countResult?.total || 0;
 
     const results = await c.env.DB.prepare(
-      `SELECT
-        id, pattern_id as patternId,
-        exception_type as exceptionType, exception_value as exceptionValue,
-        reason, scope, is_active as isActive, priority,
-        applied_count as appliedCount,
-        created_at as createdAt
-      FROM pattern_exceptions
-      ${whereClause}
-      ORDER BY pattern_id, priority DESC
+      `SELECT * FROM pattern_exceptions
+      WHERE status = ?
+      ORDER BY pattern_id, created_at DESC
       LIMIT ? OFFSET ?`
-    ).bind(limit, offset).all();
+    ).bind(status, limit, offset).all();
 
     return c.json({
       success: true,
@@ -648,11 +747,14 @@ allExceptionsRoutes.get('/', async (c) => {
     });
   } catch (error) {
     const err = error as Error;
-    return c.json({
-      success: false,
-      error: { code: 'DATABASE_ERROR', message: err.message },
-    }, 500);
+    return c.json({ success: false, error: { code: 'DATABASE_ERROR', message: err.message } }, 500);
   }
 });
 
-export { falsePositivesRoutes, patternExceptionsRoutes, allExceptionsRoutes };
+export {
+  falsePositivesRoutes,
+  patternExceptionsRoutes,
+  exceptionSuggestionsRoutes,
+  patternVersionsRoutes,
+  allExceptionsRoutes,
+};

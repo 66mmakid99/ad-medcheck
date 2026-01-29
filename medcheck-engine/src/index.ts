@@ -12,7 +12,7 @@ import { prettyJSON } from 'hono/pretty-json';
 import { secureHeaders } from 'hono/secure-headers';
 import { timing } from 'hono/timing';
 
-import { analyzeRoutes, patternsRoutes, healthRoutes, feedbackRoutes, validationRoutes } from './api/routes';
+import { analyzeRoutes, patternsRoutes, healthRoutes, feedbackRoutes, validationRoutes, falsePositivesRoutes, patternExceptionsRoutes, allExceptionsRoutes } from './api/routes';
 import { violationDetector } from './modules/violation-detector';
 import type { D1Database } from './db/d1';
 
@@ -255,6 +255,11 @@ app.route('/v1/patterns', patternsRoutes);
 app.route('/v1/health', healthRoutes);
 app.route('/v1/feedback', feedbackRoutes);
 app.route('/v1/validations', validationRoutes);
+app.route('/v1/false-positives', falsePositivesRoutes);
+app.route('/v1/exceptions', allExceptionsRoutes);
+
+// 패턴별 예외 라우트 (중첩)
+app.route('/v1/patterns/:patternId/exceptions', patternExceptionsRoutes);
 
 // ============================================
 // 배치 분석 엔드포인트

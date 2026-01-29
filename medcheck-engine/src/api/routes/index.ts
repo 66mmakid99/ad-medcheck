@@ -7,3 +7,4 @@ export { patternsRoutes } from './patterns';
 export { healthRoutes } from './health';
 export { feedbackRoutes } from './feedback';
 export { validationRoutes } from './validation';
+export { falsePositivesRoutes, patternExceptionsRoutes, allExceptionsRoutes } from './false-positives';

@@ -19,3 +19,6 @@ npm-debug.log*
 # Environment
 .env
 .env.local
+
+# Wrangler
+.wrangler/

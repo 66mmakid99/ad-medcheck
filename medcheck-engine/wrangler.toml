@@ -1,99 +1,18 @@
-# ============================================
-# MedCheck Engine - Cloudflare Workers 설정
-# ============================================
-
 name = "medcheck-engine"
 main = "dist/index.js"
 compatibility_date = "2024-01-01"
+compatibility_flags = ["nodejs_compat"]
+no_bundle = true
 
-# 계정 ID (실제 값으로 교체 필요)
-# account_id = "your-account-id"
-
-# ============================================
-# 환경 변수
-# ============================================
-
-[vars]
-ENVIRONMENT = "development"
-ENGINE_VERSION = "1.0.0"
-PATTERN_VERSION = "1.0.0"
-LOG_LEVEL = "info"
-
-# ============================================
-# D1 Database 바인딩
-# ============================================
+account_id = "cef061ba7db7004eee5cb8a22074efb8"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "medcheck-db"
 database_id = "402b74a6-363d-499a-807a-9cadda9f851c"
 
-# ============================================
-# KV Namespace 바인딩 (캐싱용)
-# ============================================
-
-# [[kv_namespaces]]
-# binding = "CACHE"
-# id = "your-kv-namespace-id"
-
-# ============================================
-# R2 Bucket 바인딩 (이미지 저장용)
-# ============================================
-
-# [[r2_buckets]]
-# binding = "IMAGES"
-# bucket_name = "medcheck-images"
-
-# ============================================
-# Secrets (민감 정보 - wrangler secret으로 설정)
-# ============================================
-#
-# wrangler secret put GEMINI_API_KEY
-# wrangler secret put SUPABASE_URL
-# wrangler secret put SUPABASE_ANON_KEY
-#
-
-# ============================================
-# Production 환경
-# ============================================
-
-[env.production]
-name = "medcheck-engine-prod"
-
-[env.production.vars]
-ENVIRONMENT = "production"
-LOG_LEVEL = "warn"
-
-[[env.production.d1_databases]]
-binding = "DB"
-database_name = "medcheck-db-prod"
-database_id = "your-production-database-id"
-
-# ============================================
-# Staging 환경
-# ============================================
-
-[env.staging]
-name = "medcheck-engine-staging"
-
-[env.staging.vars]
-ENVIRONMENT = "staging"
+[vars]
+ENVIRONMENT = "development"
+ENGINE_VERSION = "1.0.0"
+PATTERN_VERSION = "1.0.0"
 LOG_LEVEL = "info"
-
-[[env.staging.d1_databases]]
-binding = "DB"
-database_name = "medcheck-db-staging"
-database_id = "your-staging-database-id"
-
-# ============================================
-# 개발용 설정
-# ============================================
-
-[dev]
-port = 8787
-local_protocol = "http"
-
-# D1 로컬 개발 설정
-[dev.d1_databases]
-binding = "DB"
-database_name = "medcheck-db"

@@ -1,59 +1,72 @@
 /**
  * 분석 API 라우트
- * POST /v1/analyze
+ * POST /v1/analyze - 의료광고 위반 분석
  */
 
 import { Hono } from 'hono';
-import { validator } from 'hono/validator';
 import type { D1Database } from '../../db/d1';
-import { D1Service } from '../../db/d1';
-import { Parser } from '../../core/parser';
-import { Normalizer } from '../../core/normalizer';
-import { createTracer } from '../../core/tracer';
-import { ErrorCode, AnalysisError, InputError } from '../../core/error-handler';
-import type { ModuleInput, ModuleOutput, ViolationResult } from '../../types';
+import { violationDetector, GRADE_DESCRIPTIONS } from '../../modules/violation-detector';
+import { patternMatcher } from '../../modules/violation-detector';
+import { contextAnalyzer } from '../../modules/ai-analyzer';
+import type { AnalysisGrade, ScoreResult } from '../../modules/violation-detector';
+import type { ViolationResult } from '../../types';
 
 // ============================================
 // 타입 정의
 // ============================================
 
-/**
- * 환경 바인딩
- */
 export interface Env {
   DB: D1Database;
   ENVIRONMENT: string;
   ENGINE_VERSION: string;
   PATTERN_VERSION: string;
+  CLAUDE_API_KEY?: string;
+  GEMINI_API_KEY?: string;
 }
 
 /**
- * 분석 요청 바디
+ * 분석 요청
  */
 export interface AnalyzeRequest {
-  /** 분석할 URL */
-  url?: string;
-  /** 직접 제공하는 HTML 콘텐츠 */
-  html?: string;
-  /** 직접 제공하는 텍스트 콘텐츠 */
-  text?: string;
-  /** 이미지 URL 목록 */
-  images?: string[];
+  /** 분석할 텍스트 (필수) */
+  text: string;
+  /** AI 분석 활성화 */
+  enableAI?: boolean;
+  /** 분석 옵션 */
+  options?: {
+    /** 특정 카테고리만 검사 */
+    categories?: string[];
+    /** 최소 심각도 */
+    minSeverity?: 'critical' | 'major' | 'minor';
+    /** 상세 결과 포함 */
+    detailed?: boolean;
+    /** AI 제공자 (claude/gemini) */
+    aiProvider?: 'claude' | 'gemini';
+  };
   /** 메타데이터 */
   metadata?: {
     hospitalName?: string;
     department?: string;
     adType?: string;
+    url?: string;
   };
-  /** 옵션 */
-  options?: {
-    /** OCR 사용 여부 */
-    useOCR?: boolean;
-    /** AI 리뷰 사용 여부 */
-    useAI?: boolean;
-    /** 상세 결과 포함 */
-    detailed?: boolean;
-  };
+}
+
+/**
+ * AI 분석 정보
+ */
+interface AIAnalysisInfo {
+  enabled: boolean;
+  provider?: string;
+  itemsAnalyzed: number;
+  additionalViolations: number;
+  processingTimeMs: number;
+  reasoning?: Array<{
+    text: string;
+    isViolation: boolean;
+    confidence: number;
+    reasoning: string;
+  }>;
 }
 
 /**
@@ -63,138 +76,22 @@ export interface AnalyzeResponse {
   success: boolean;
   data?: {
     analysisId: string;
-    url?: string;
+    inputLength: number;
     violationCount: number;
     violations: ViolationResult[];
+    score: ScoreResult;
+    grade: AnalysisGrade;
+    gradeDescription: string;
     summary: string;
-    confidence: number;
+    recommendations: string[];
     processingTimeMs: number;
     analyzedAt: string;
+    ai?: AIAnalysisInfo;
   };
   error?: {
     code: string;
     message: string;
   };
-}
-
-// ============================================
-// 패턴 로딩 (임시 - 실제로는 DB/KV에서 로드)
-// ============================================
-
-import patternsData from '../../../patterns/patterns.json';
-
-interface PatternData {
-  id: string;
-  category: string;
-  subcategory: string;
-  pattern: string;
-  severity: string;
-  legalBasis: string;
-  description: string;
-}
-
-function loadPatterns(): PatternData[] {
-  return (patternsData as { patterns: PatternData[] }).patterns || [];
-}
-
-// ============================================
-// 분석 로직
-// ============================================
-
-/**
- * 패턴 매칭 실행
- */
-function matchPatterns(text: string, patterns: PatternData[]): ViolationResult[] {
-  const violations: ViolationResult[] = [];
-  const normalizedText = text.toLowerCase();
-
-  for (const pattern of patterns) {
-    try {
-      const regex = new RegExp(pattern.pattern, 'gi');
-      let match: RegExpExecArray | null;
-
-      while ((match = regex.exec(text)) !== null) {
-        const matchedText = match[0];
-        const matchIndex = match.index;
-
-        // 중복 체크
-        const isDuplicate = violations.some(
-          (v) => v.patternId === pattern.id && v.matchedText === matchedText
-        );
-
-        if (!isDuplicate) {
-          violations.push({
-            type: mapCategoryToType(pattern.category),
-            status: 'violation',
-            severity: mapSeverity(pattern.severity),
-            matchedText,
-            position: matchIndex,
-            description: pattern.description,
-            legalBasis: [
-              {
-                law: '의료법',
-                article: pattern.legalBasis,
-                description: pattern.description,
-              },
-            ],
-            confidence: 0.9,
-            patternId: pattern.id,
-          });
-        }
-      }
-    } catch (e) {
-      // 잘못된 정규식은 스킵
-      console.warn(`Invalid pattern: ${pattern.id}`, e);
-    }
-  }
-
-  return violations;
-}
-
-/**
- * 카테고리 → 위반 유형 매핑
- */
-function mapCategoryToType(category: string): ViolationResult['type'] {
-  const mapping: Record<string, ViolationResult['type']> = {
-    '치료효과보장': 'guarantee',
-    '부작용부정': 'false_claim',
-    '최상급표현': 'exaggeration',
-    '비교광고': 'comparison',
-    '환자유인': 'price_inducement',
-    '전후사진': 'before_after',
-    '체험기': 'testimonial',
-    '금지어': 'prohibited_expression',
-  };
-  return mapping[category] || 'other';
-}
-
-/**
- * 심각도 매핑
- */
-function mapSeverity(severity: string): ViolationResult['severity'] {
-  if (severity === 'critical') return 'high';
-  if (severity === 'major') return 'medium';
-  return 'low';
-}
-
-/**
- * 요약 생성
- */
-function generateSummary(violations: ViolationResult[]): string {
-  if (violations.length === 0) {
-    return '위반 사항이 발견되지 않았습니다.';
-  }
-
-  const highCount = violations.filter((v) => v.severity === 'high').length;
-  const mediumCount = violations.filter((v) => v.severity === 'medium').length;
-  const lowCount = violations.filter((v) => v.severity === 'low').length;
-
-  const parts: string[] = [];
-  if (highCount > 0) parts.push(`심각 ${highCount}건`);
-  if (mediumCount > 0) parts.push(`주요 ${mediumCount}건`);
-  if (lowCount > 0) parts.push(`경미 ${lowCount}건`);
-
-  return `총 ${violations.length}건의 위반 발견 (${parts.join(', ')})`;
 }
 
 // ============================================
@@ -204,226 +101,313 @@ function generateSummary(violations: ViolationResult[]): string {
 const analyzeRoutes = new Hono<{ Bindings: Env }>();
 
 /**
- * POST /v1/analyze - 분석 요청
+ * POST /v1/analyze - 텍스트 위반 분석
  */
-analyzeRoutes.post(
-  '/',
-  validator('json', (value, c) => {
-    const body = value as AnalyzeRequest;
+analyzeRoutes.post('/', async (c) => {
+  let body: AnalyzeRequest;
 
-    // 최소 하나의 입력 필요
-    if (!body.url && !body.html && !body.text) {
+  // JSON 파싱
+  try {
+    body = await c.req.json<AnalyzeRequest>();
+  } catch (e) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: 'PARSE_ERROR',
+          message: 'Invalid JSON in request body',
+        },
+      } as AnalyzeResponse,
+      400
+    );
+  }
+
+  // text 필수 검증
+  if (!body.text || typeof body.text !== 'string') {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: 'INVALID_INPUT',
+          message: 'text 필드는 필수입니다.',
+        },
+      } as AnalyzeResponse,
+      400
+    );
+  }
+
+  // 텍스트 길이 검증
+  if (body.text.length < 1) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: 'EMPTY_CONTENT',
+          message: '분석할 텍스트가 비어있습니다.',
+        },
+      } as AnalyzeResponse,
+      400
+    );
+  }
+
+  if (body.text.length > 100000) {
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: 'INPUT_TOO_LARGE',
+          message: '텍스트가 너무 깁니다. (최대 100,000자)',
+        },
+      } as AnalyzeResponse,
+      400
+    );
+  }
+
+  try {
+    const startTime = Date.now();
+
+    // 1. 패턴 매칭 분석
+    const result = violationDetector.analyze({
+      text: body.text,
+      options: {
+        categories: body.options?.categories,
+        minSeverity: body.options?.minSeverity,
+      },
+    });
+
+    let allViolations = [...result.judgment.violations];
+    let aiInfo: AIAnalysisInfo = {
+      enabled: false,
+      itemsAnalyzed: 0,
+      additionalViolations: 0,
+      processingTimeMs: 0,
+    };
+
+    // 2. AI 분석 (enableAI가 true인 경우)
+    if (body.enableAI) {
+      const provider = body.options?.aiProvider || 'gemini';
+      const apiKey = provider === 'claude'
+        ? c.env.CLAUDE_API_KEY
+        : c.env.GEMINI_API_KEY;
+
+      if (apiKey) {
+        try {
+          // AI 분석기 설정
+          contextAnalyzer.configure({
+            provider,
+            apiKey,
+            confidenceThreshold: 0.7,
+            maxAIAnalysis: 5,
+          });
+
+          // AI 분석 수행
+          const aiResult = await contextAnalyzer.analyze(
+            body.text,
+            result.matches
+          );
+
+          // AI가 추가로 발견한 위반 추가
+          allViolations = [...allViolations, ...aiResult.additionalViolations];
+
+          // AI 분석 정보
+          aiInfo = {
+            enabled: true,
+            provider,
+            itemsAnalyzed: aiResult.aiCallCount,
+            additionalViolations: aiResult.additionalViolations.length,
+            processingTimeMs: aiResult.aiProcessingTimeMs,
+            reasoning: body.options?.detailed
+              ? aiResult.aiAnalyzedItems.map(item => ({
+                  text: item.target.text,
+                  isViolation: item.result.isViolation,
+                  confidence: item.result.confidence,
+                  reasoning: item.result.reasoning,
+                }))
+              : undefined,
+          };
+        } catch (aiError) {
+          // AI 분석 실패 시에도 패턴 매칭 결과는 반환
+          aiInfo = {
+            enabled: true,
+            provider,
+            itemsAnalyzed: 0,
+            additionalViolations: 0,
+            processingTimeMs: 0,
+          };
+          console.warn('AI analysis failed:', aiError);
+        }
+      } else {
+        aiInfo = {
+          enabled: false,
+          itemsAnalyzed: 0,
+          additionalViolations: 0,
+          processingTimeMs: 0,
+        };
+      }
+    }
+
+    // 3. 점수 재계산 (AI 추가 위반 포함)
+    const finalScore = result.judgment.score;
+    if (aiInfo.additionalViolations > 0) {
+      // AI가 추가로 발견한 위반에 대한 점수 추가
+      finalScore.totalScore = Math.min(100, finalScore.totalScore + (aiInfo.additionalViolations * 10));
+
+      // 등급 재계산
+      if (finalScore.totalScore === 0) finalScore.grade = 'A';
+      else if (finalScore.totalScore <= 10) finalScore.grade = 'B';
+      else if (finalScore.totalScore <= 30) finalScore.grade = 'C';
+      else if (finalScore.totalScore <= 60) finalScore.grade = 'D';
+      else finalScore.grade = 'F';
+
+      finalScore.gradeDescription = GRADE_DESCRIPTIONS[finalScore.grade];
+      finalScore.complianceRate = 100 - finalScore.totalScore;
+    }
+
+    // 4. 요약 업데이트
+    let summary = result.judgment.summary;
+    if (aiInfo.additionalViolations > 0) {
+      summary += ` AI가 ${aiInfo.additionalViolations}건의 추가 위반을 발견했습니다.`;
+    }
+
+    const totalProcessingTime = Date.now() - startTime;
+
+    // 응답 생성
+    const response: AnalyzeResponse = {
+      success: true,
+      data: {
+        analysisId: result.id,
+        inputLength: result.inputLength,
+        violationCount: allViolations.length,
+        violations: body.options?.detailed
+          ? allViolations
+          : allViolations.slice(0, 10),
+        score: finalScore,
+        grade: finalScore.grade,
+        gradeDescription: finalScore.gradeDescription,
+        summary,
+        recommendations: result.judgment.recommendations,
+        processingTimeMs: totalProcessingTime,
+        analyzedAt: result.judgment.analyzedAt.toISOString(),
+        ai: body.enableAI ? aiInfo : undefined,
+      },
+    };
+
+    return c.json(response);
+  } catch (error) {
+    const err = error as Error;
+
+    return c.json(
+      {
+        success: false,
+        error: {
+          code: 'ANALYSIS_ERROR',
+          message: err.message,
+        },
+      } as AnalyzeResponse,
+      500
+    );
+  }
+});
+
+/**
+ * POST /v1/analyze/quick - 빠른 점수 조회
+ */
+analyzeRoutes.post('/quick', async (c) => {
+  try {
+    const body = await c.req.json<{ text: string }>();
+
+    if (!body.text) {
       return c.json(
         {
           success: false,
-          error: {
-            code: ErrorCode.EMPTY_CONTENT,
-            message: 'url, html, 또는 text 중 하나는 필수입니다.',
-          },
-        } as AnalyzeResponse,
+          error: { code: 'INVALID_INPUT', message: 'text 필드는 필수입니다.' },
+        },
         400
       );
     }
 
-    return body;
-  }),
-  async (c) => {
-    const startTime = Date.now();
-    const body = c.req.valid('json');
-    const env = c.env;
-
-    // D1 서비스 설정
-    const db = new D1Service();
-    db.setDatabase(env.DB);
-
-    // 트레이서 생성
-    const tracer = createTracer({ persistToDb: true, consoleLog: false });
-
-    let analysisLogId: string | null = null;
-
-    try {
-      // 1. 분석 로그 생성
-      analysisLogId = await db.createAnalysisLog(body.url || 'direct-input', {
-        sourceType: body.metadata?.adType || 'unknown',
-        hospitalName: body.metadata?.hospitalName,
-        department: body.metadata?.department,
-        engineVersion: env.ENGINE_VERSION || '1.0.0',
-        patternVersion: env.PATTERN_VERSION || '1.0.0',
-      });
-
-      await tracer.startSession(analysisLogId);
-
-      // 2. 입력 데이터 준비
-      await tracer.startStep('parse');
-      const parser = new Parser();
-      const normalizer = new Normalizer();
-
-      let content: string;
-      let images: string[] = body.images || [];
-
-      if (body.html) {
-        const moduleInput: ModuleInput = {
-          source: body.url || 'direct-input',
-          content: body.html,
-        };
-        const parseResult = parser.parse(moduleInput);
-        content = parseResult.text;
-        images = [...images, ...parseResult.images];
-      } else if (body.text) {
-        content = body.text;
-      } else {
-        // URL에서 콘텐츠 가져오기 (실제로는 SCV 사용)
-        throw new InputError(
-          'URL 분석은 SCV 모듈이 필요합니다.',
-          ErrorCode.INVALID_INPUT
-        );
-      }
-
-      await tracer.completeStep({
-        contentLength: content.length,
-        imageCount: images.length,
-      });
-
-      // 3. 텍스트 정규화
-      await tracer.startStep('normalize');
-      const normalizedContent = normalizer.prepareForAnalysis(content);
-      await tracer.completeStep({
-        originalLength: content.length,
-        normalizedLength: normalizedContent.length,
-      });
-
-      // 4. 패턴 매칭
-      await tracer.startStep('pattern_match');
-      const patterns = loadPatterns();
-      const violations = matchPatterns(normalizedContent, patterns);
-
-      // 패턴 매칭 트레이스
-      for (const v of violations) {
-        tracer.tracePatternMatch({
-          patternId: v.patternId || 'unknown',
-          category: v.type,
-          matchedText: v.matchedText,
-          position: v.position || 0,
-          confidence: v.confidence,
-          severity: v.severity,
-          source: 'text',
-        });
-      }
-
-      await tracer.completeStep({
-        patternsChecked: patterns.length,
-        violationsFound: violations.length,
-      });
-
-      // 5. 결과 생성
-      const processingTimeMs = Date.now() - startTime;
-      const confidence = violations.length > 0 ? 0.85 : 0.95;
-      const summary = generateSummary(violations);
-
-      const result: ModuleOutput = {
-        violations,
-        summary,
-        confidence,
-        processingTime: processingTimeMs,
-        analyzedAt: new Date(),
-      };
-
-      // 6. 결과 저장
-      await db.saveAnalysisResult(analysisLogId, result, {
-        contentLength: content.length,
-        imageCount: images.length,
-        ocrUsed: false,
-      });
-
-      // 7. 세션 종료
-      const traceSummary = await tracer.endSession({
-        violationCount: violations.length,
-        processingTimeMs,
-      });
-
-      // 8. 응답
-      const response: AnalyzeResponse = {
-        success: true,
-        data: {
-          analysisId: analysisLogId,
-          url: body.url,
-          violationCount: violations.length,
-          violations: body.options?.detailed ? violations : violations.slice(0, 10),
-          summary,
-          confidence,
-          processingTimeMs,
-          analyzedAt: new Date().toISOString(),
-        },
-      };
-
-      return c.json(response);
-    } catch (error) {
-      const err = error as Error;
-
-      // 에러 저장
-      if (analysisLogId) {
-        await db.saveAnalysisError(
-          analysisLogId,
-          (err as AnalysisError).code || ErrorCode.ANALYSIS_ERROR,
-          err.message
-        );
-      }
-
-      const response: AnalyzeResponse = {
-        success: false,
-        error: {
-          code: (err as AnalysisError).code || ErrorCode.ANALYSIS_ERROR,
-          message: err.message,
-        },
-      };
-
-      return c.json(response, 500);
-    }
-  }
-);
-
-/**
- * GET /v1/analyze/:id - 분석 결과 조회
- */
-analyzeRoutes.get('/:id', async (c) => {
-  const id = c.req.param('id');
-  const env = c.env;
-
-  const db = new D1Service();
-  db.setDatabase(env.DB);
-
-  try {
-    const log = await db.getAnalysisLog(id);
-
-    if (!log) {
-      return c.json(
-        {
-          success: false,
-          error: {
-            code: ErrorCode.INVALID_INPUT,
-            message: '분석 결과를 찾을 수 없습니다.',
-          },
-        },
-        404
-      );
-    }
+    const score = violationDetector.quickScore(body.text);
 
     return c.json({
       success: true,
-      data: log,
+      data: {
+        score: score.totalScore,
+        grade: score.grade,
+        gradeDescription: score.gradeDescription,
+        complianceRate: score.complianceRate,
+      },
     });
   } catch (error) {
     return c.json(
       {
         success: false,
-        error: {
-          code: ErrorCode.DB_QUERY_ERROR,
-          message: (error as Error).message,
-        },
+        error: { code: 'PARSE_ERROR', message: 'Invalid JSON in request body' },
       },
-      500
+      400
     );
   }
+});
+
+/**
+ * POST /v1/analyze/check - 위반 여부만 확인
+ */
+analyzeRoutes.post('/check', async (c) => {
+  try {
+    const body = await c.req.json<{ text: string }>();
+
+    if (!body.text) {
+      return c.json(
+        {
+          success: false,
+          error: { code: 'INVALID_INPUT', message: 'text 필드는 필수입니다.' },
+        },
+        400
+      );
+    }
+
+    const hasViolation = violationDetector.hasViolation(body.text);
+
+    return c.json({
+      success: true,
+      data: {
+        hasViolation,
+        message: hasViolation
+          ? '위반 사항이 발견되었습니다.'
+          : '위반 사항이 없습니다.',
+      },
+    });
+  } catch (error) {
+    return c.json(
+      {
+        success: false,
+        error: { code: 'PARSE_ERROR', message: 'Invalid JSON in request body' },
+      },
+      400
+    );
+  }
+});
+
+/**
+ * GET /v1/analyze/info - 분석 엔진 정보
+ */
+analyzeRoutes.get('/info', (c) => {
+  const hasClaudeKey = !!c.env.CLAUDE_API_KEY;
+  const hasGeminiKey = !!c.env.GEMINI_API_KEY;
+
+  return c.json({
+    success: true,
+    data: {
+      patternCount: violationDetector.getPatternCount(),
+      categories: violationDetector.getCategories(),
+      grades: GRADE_DESCRIPTIONS,
+      version: c.env.ENGINE_VERSION || '1.0.0',
+      patternVersion: c.env.PATTERN_VERSION || '1.0.0',
+      aiAvailable: {
+        claude: hasClaudeKey,
+        gemini: hasGeminiKey,
+      },
+    },
+  });
 });
 
 export { analyzeRoutes };

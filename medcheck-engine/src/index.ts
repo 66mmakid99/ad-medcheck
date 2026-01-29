@@ -12,7 +12,7 @@ import { prettyJSON } from 'hono/pretty-json';
 import { secureHeaders } from 'hono/secure-headers';
 import { timing } from 'hono/timing';
 
-import { analyzeRoutes, patternsRoutes, healthRoutes } from './api/routes';
+import { analyzeRoutes, patternsRoutes, healthRoutes, feedbackRoutes, validationRoutes } from './api/routes';
 import type { D1Database } from './db/d1';
 
 // ============================================
@@ -125,6 +125,8 @@ app.get('/', (c) => {
         analyze: '/v1/analyze',
         patterns: '/v1/patterns',
         health: '/v1/health',
+        feedback: '/v1/feedback',
+        validations: '/v1/validations',
       },
     },
   });
@@ -203,6 +205,44 @@ app.get('/docs', (c) => {
           method: 'GET',
           description: 'Kubernetes Readiness Probe',
         },
+        {
+          path: '/feedback',
+          method: 'POST',
+          description: '오탐/미탐 피드백 제출',
+          body: {
+            analysisId: 'string (필수)',
+            type: 'string (false_positive|false_negative)',
+            comment: 'string (선택)',
+            patternId: 'string (선택, 오탐 시)',
+            missedText: 'string (선택, 미탐 시)',
+          },
+        },
+        {
+          path: '/feedback/:id',
+          method: 'GET',
+          description: '피드백 상세 조회',
+        },
+        {
+          path: '/validations',
+          method: 'GET',
+          description: '검증 대기 목록 조회',
+          query: {
+            status: 'string (pending|approved|rejected)',
+            type: 'string (ocr|ai_analysis|pattern_match)',
+            page: 'number (기본: 1)',
+            limit: 'number (기본: 20)',
+          },
+        },
+        {
+          path: '/validations/:id/approve',
+          method: 'POST',
+          description: '검증 승인',
+        },
+        {
+          path: '/validations/:id/reject',
+          method: 'POST',
+          description: '검증 거절',
+        },
       ],
     },
   });
@@ -212,6 +252,8 @@ app.get('/docs', (c) => {
 app.route('/v1/analyze', analyzeRoutes);
 app.route('/v1/patterns', patternsRoutes);
 app.route('/v1/health', healthRoutes);
+app.route('/v1/feedback', feedbackRoutes);
+app.route('/v1/validations', validationRoutes);
 
 // ============================================
 // 에러 핸들링
@@ -269,7 +311,11 @@ app.onError((err, c) => {
 });
 
 // ============================================
-// Export
+// Export (ES Module 형식 - Cloudflare Workers)
 // ============================================
 
-export default app;
+export default {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return app.fetch(request, env, ctx);
+  },
+};

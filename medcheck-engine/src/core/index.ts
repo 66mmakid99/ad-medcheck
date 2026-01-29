@@ -1,0 +1,20 @@
+/**
+ * Core 모듈 엔트리 포인트
+ * Engine Core 컴포넌트들을 export
+ */
+
+// Parser
+export { Parser, parser } from './parser';
+export type { ParseResult, ExtractedPrice } from './parser';
+
+// Normalizer
+export { Normalizer, normalizer } from './normalizer';
+export type { NormalizeOptions } from './normalizer';
+
+// Router
+export { Router, router } from './router';
+export type { AnalysisModule, ModuleResult, RoutingOptions } from './router';
+
+// Logger
+export { Logger, logger, FileLogHandler } from './logger';
+export type { LogLevel, LogEntry, LoggerConfig, LogHandler } from './logger';

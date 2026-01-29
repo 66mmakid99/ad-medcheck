@@ -13,6 +13,7 @@ import { secureHeaders } from 'hono/secure-headers';
 import { timing } from 'hono/timing';
 
 import { analyzeRoutes, patternsRoutes, healthRoutes, feedbackRoutes, validationRoutes } from './api/routes';
+import { violationDetector } from './modules/violation-detector';
 import type { D1Database } from './db/d1';
 
 // ============================================
@@ -254,6 +255,172 @@ app.route('/v1/patterns', patternsRoutes);
 app.route('/v1/health', healthRoutes);
 app.route('/v1/feedback', feedbackRoutes);
 app.route('/v1/validations', validationRoutes);
+
+// ============================================
+// 배치 분석 엔드포인트
+// ============================================
+
+/**
+ * POST /v1/batch - 여러 텍스트 한번에 분석
+ */
+app.post('/v1/batch', async (c) => {
+  let body: { texts: string[] };
+
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return c.json({
+      success: false,
+      error: { code: 'PARSE_ERROR', message: 'Invalid JSON in request body' },
+    }, 400);
+  }
+
+  if (!body.texts || !Array.isArray(body.texts)) {
+    return c.json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'texts 배열은 필수입니다.' },
+    }, 400);
+  }
+
+  if (body.texts.length > 100) {
+    return c.json({
+      success: false,
+      error: { code: 'TOO_MANY_ITEMS', message: '최대 100개까지 분석 가능합니다.' },
+    }, 400);
+  }
+
+  const startTime = Date.now();
+  const results = body.texts.map((text, index) => {
+    if (typeof text !== 'string' || text.length === 0) {
+      return {
+        index,
+        success: false,
+        error: '유효하지 않은 텍스트',
+      };
+    }
+
+    try {
+      const result = violationDetector.analyze({ text });
+      return {
+        index,
+        success: true,
+        inputLength: text.length,
+        violationCount: result.judgment.violations.length,
+        score: result.judgment.score.totalScore,
+        grade: result.judgment.score.grade,
+        hasViolation: result.judgment.violations.length > 0,
+      };
+    } catch (err) {
+      return {
+        index,
+        success: false,
+        error: '분석 실패',
+      };
+    }
+  });
+
+  const successCount = results.filter(r => r.success).length;
+  const violationCount = results.filter(r => r.success && r.hasViolation).length;
+
+  return c.json({
+    success: true,
+    data: {
+      totalCount: body.texts.length,
+      successCount,
+      failCount: body.texts.length - successCount,
+      violationCount,
+      cleanCount: successCount - violationCount,
+      processingTimeMs: Date.now() - startTime,
+      results,
+    },
+  });
+});
+
+// ============================================
+// 통계 엔드포인트
+// ============================================
+
+/**
+ * GET /v1/stats - 분석 통계 조회
+ */
+app.get('/v1/stats', async (c) => {
+  try {
+    // 피드백 통계
+    const feedbackStats = await c.env.DB.prepare(`
+      SELECT
+        type,
+        status,
+        COUNT(*) as count
+      FROM feedback
+      GROUP BY type, status
+    `).all<{ type: string; status: string; count: number }>();
+
+    // 검증 통계
+    const validationStats = await c.env.DB.prepare(`
+      SELECT
+        type,
+        status,
+        COUNT(*) as count
+      FROM ocr_validations
+      GROUP BY type, status
+    `).all<{ type: string; status: string; count: number }>();
+
+    // 피드백 집계
+    const feedbackSummary = {
+      total: 0,
+      byType: { false_positive: 0, false_negative: 0 },
+      byStatus: { pending: 0, reviewed: 0, resolved: 0 },
+    };
+
+    (feedbackStats.results || []).forEach(row => {
+      feedbackSummary.total += row.count;
+      if (row.type === 'false_positive') feedbackSummary.byType.false_positive += row.count;
+      if (row.type === 'false_negative') feedbackSummary.byType.false_negative += row.count;
+      if (row.status === 'pending') feedbackSummary.byStatus.pending += row.count;
+      if (row.status === 'reviewed') feedbackSummary.byStatus.reviewed += row.count;
+      if (row.status === 'resolved') feedbackSummary.byStatus.resolved += row.count;
+    });
+
+    // 검증 집계
+    const validationSummary = {
+      total: 0,
+      byType: { ocr: 0, ai_analysis: 0, pattern_match: 0 },
+      byStatus: { pending: 0, approved: 0, rejected: 0 },
+    };
+
+    (validationStats.results || []).forEach(row => {
+      validationSummary.total += row.count;
+      if (row.type === 'ocr') validationSummary.byType.ocr += row.count;
+      if (row.type === 'ai_analysis') validationSummary.byType.ai_analysis += row.count;
+      if (row.type === 'pattern_match') validationSummary.byType.pattern_match += row.count;
+      if (row.status === 'pending') validationSummary.byStatus.pending += row.count;
+      if (row.status === 'approved') validationSummary.byStatus.approved += row.count;
+      if (row.status === 'rejected') validationSummary.byStatus.rejected += row.count;
+    });
+
+    // 패턴 정보
+    const patternInfo = {
+      totalPatterns: violationDetector.getPatternCount(),
+      categories: violationDetector.getCategories(),
+    };
+
+    return c.json({
+      success: true,
+      data: {
+        feedback: feedbackSummary,
+        validations: validationSummary,
+        patterns: patternInfo,
+        generatedAt: new Date().toISOString(),
+      },
+    });
+  } catch (error) {
+    const err = error as Error;
+    return c.json({
+      success: false,
+      error: { code: 'DATABASE_ERROR', message: err.message },
+    }, 500);
+  }
+});
 
 // ============================================
 // 에러 핸들링

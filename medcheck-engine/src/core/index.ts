@@ -18,3 +18,25 @@ export type { AnalysisModule, ModuleResult, RoutingOptions } from './router';
 // Logger
 export { Logger, logger, FileLogHandler } from './logger';
 export type { LogLevel, LogEntry, LoggerConfig, LogHandler } from './logger';
+
+// Error Handler
+export {
+  MedCheckError,
+  InputError,
+  ParseError,
+  PatternError,
+  AnalysisError,
+  ExternalServiceError,
+  DatabaseError,
+  SCVError,
+  OCRError,
+  ErrorHandler,
+  errorHandler,
+  ErrorCode,
+} from './error-handler';
+export type {
+  ErrorCodeType,
+  ErrorSeverity,
+  ErrorMetadata,
+  ErrorHandlerOptions,
+} from './error-handler';

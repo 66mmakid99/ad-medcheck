@@ -6,7 +6,7 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "esbuild src/index.ts --bundle --format=esm --platform=neutral --outfile=dist/index.js",
     "start": "node dist/index.js",
     "dev": "wrangler dev",
     "dev:local": "wrangler dev --local",
@@ -27,6 +27,7 @@
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260129.0",
     "@types/node": "^25.1.0",
+    "esbuild": "^0.27.2",
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "wrangler": "^4.61.1"

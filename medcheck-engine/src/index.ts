@@ -269,7 +269,9 @@ app.onError((err, c) => {
 });
 
 // ============================================
-// Export
+// Export (ES Module 형식)
 // ============================================
 
-export default app;
+export default {
+  fetch: app.fetch,
+};

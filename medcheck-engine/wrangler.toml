@@ -7,11 +7,6 @@ main = "src/index.ts"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
 
-# ES Module 규칙 (D1 바인딩 필수)
-[[rules]]
-type = "ESModule"
-globs = ["**/*.ts", "**/*.js"]
-
 # 계정 ID (실제 값으로 교체 필요)
 # account_id = "your-account-id"
 

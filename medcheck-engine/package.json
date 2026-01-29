@@ -1,6 +1,7 @@
 {
   "name": "medcheck-engine",
   "version": "1.0.0",
+  "type": "module",
   "description": "의료광고위반 분석 엔진",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

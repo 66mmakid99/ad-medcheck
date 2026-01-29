@@ -2,6 +2,10 @@
  * API 모듈 엔트리 포인트
  */
 
+// Routes (Hono)
+export { analyzeRoutes, patternsRoutes, healthRoutes } from './routes';
+
+// Legacy Health Service (Express 호환)
 export {
   HealthCheckService,
   healthCheckService,

@@ -26,7 +26,7 @@ LOG_LEVEL = "info"
 [[d1_databases]]
 binding = "DB"
 database_name = "medcheck-db"
-database_id = "your-database-id"  # wrangler d1 create로 생성 후 ID 입력
+database_id = "402b74a6-363d-499a-807a-9cadda9f851c"
 
 # ============================================
 # KV Namespace 바인딩 (캐싱용)

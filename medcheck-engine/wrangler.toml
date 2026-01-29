@@ -2,6 +2,7 @@ name = "medcheck-engine"
 main = "dist/index.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
+no_bundle = true
 
 account_id = "cef061ba7db7004eee5cb8a22074efb8"
 

@@ -40,3 +40,16 @@ export type {
   ErrorMetadata,
   ErrorHandlerOptions,
 } from './error-handler';
+
+// Tracer
+export { Tracer, tracer, createTracer } from './tracer';
+export type {
+  AnalysisStep,
+  TraceStatus,
+  StepContext,
+  OCRTraceData,
+  PatternMatchTraceData,
+  AIDecisionTraceData,
+  TracerConfig,
+  TraceSummary,
+} from './tracer';

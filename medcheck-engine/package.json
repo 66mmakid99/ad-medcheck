@@ -7,15 +7,30 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "ts-node src/index.ts",
+    "dev": "wrangler dev",
+    "dev:local": "wrangler dev --local",
+    "deploy": "wrangler deploy",
+    "deploy:staging": "wrangler deploy --env staging",
+    "deploy:prod": "wrangler deploy --env production",
+    "d1:init": "wrangler d1 execute medcheck-db --local --file=src/db/schema.d1.sql",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "keywords": ["medical", "advertisement", "compliance", "korea"],
+  "keywords": [
+    "medical",
+    "advertisement",
+    "compliance",
+    "korea"
+  ],
   "author": "",
   "license": "ISC",
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260129.0",
     "@types/node": "^25.1.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3"
+    "typescript": "^5.9.3",
+    "wrangler": "^4.61.1"
+  },
+  "dependencies": {
+    "hono": "^4.11.7"
   }
 }

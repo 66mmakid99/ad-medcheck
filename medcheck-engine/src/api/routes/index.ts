@@ -5,3 +5,5 @@
 export { analyzeRoutes } from './analyze';
 export { patternsRoutes } from './patterns';
 export { healthRoutes } from './health';
+export { feedbackRoutes } from './feedback';
+export { validationRoutes } from './validation';

@@ -269,9 +269,11 @@ app.onError((err, c) => {
 });
 
 // ============================================
-// Export (ES Module 형식)
+// Export (ES Module 형식 - Cloudflare Workers)
 // ============================================
 
 export default {
-  fetch: app.fetch,
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    return app.fetch(request, env, ctx);
+  },
 };

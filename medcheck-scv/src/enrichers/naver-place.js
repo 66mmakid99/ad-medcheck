@@ -326,14 +326,21 @@ async function main() {
      .option('--limit <n>', 'Limit number of hospitals to process', parseInt)
      .option('--skip-existing', 'Skip hospitals that already have homepage URL')
      .option('--no-resume', 'Disable auto-resume after completion')
+     .option('--auto-google', 'Automatically run Google search for unfound hospitals')
      .parse(process.argv);
 
   const options = program.opts();
-  
-  // 입력 파일 확인
-  const inputPath = path.isAbsolute(options.input) 
-    ? options.input 
-    : path.join(OUTPUT_DIR, options.input);
+
+  // 입력 파일 확인 (output/ 중복 방지)
+  let inputPath = options.input;
+  if (!path.isAbsolute(inputPath)) {
+    // output/ 또는 output\으로 시작하면 __dirname 기준으로만 연결
+    if (inputPath.startsWith('output/') || inputPath.startsWith('output\\')) {
+      inputPath = path.join(__dirname, '..', '..', inputPath);
+    } else {
+      inputPath = path.join(OUTPUT_DIR, inputPath);
+    }
+  }
     
   if (!fs.existsSync(inputPath)) {
     console.error(`Input file not found: ${inputPath}`);
@@ -478,15 +485,52 @@ async function main() {
   
    // 통계 출력
    console.log('\n' + '='.repeat(60));
-   console.log('완료!');
+   console.log('네이버 플레이스 검색 완료!');
    console.log('='.repeat(60));
    console.log(`처리: ${targetHospitals.length}개`);
    console.log(`발견: ${found}개 (${(found/targetHospitals.length*100).toFixed(1)}%)`);
    console.log(`미발견: ${notFound}개`);
    console.log(`저장: ${outputPath}`);
-   
+
+   // --auto-google 옵션: 못 찾은 병원 구글 검색으로 자동 전환
+   if (options.autoGoogle && notFound > 0) {
+     console.log('\n' + '#'.repeat(60));
+     console.log('# 2단계: 구글 검색 자동 시작');
+     console.log(`# 대상: ${notFound}개 병원 (네이버에서 미발견)`);
+     console.log('#'.repeat(60));
+
+     const { spawn } = require('child_process');
+     const googleScript = path.join(__dirname, 'google-search.js');
+
+     const googleArgs = [
+       googleScript,
+       '--input', outputPath,
+       '--skip-existing'
+     ];
+
+     if (options.limit) googleArgs.push('--limit', options.limit.toString());
+
+     console.log(`\n실행: node ${googleArgs.slice(1).join(' ')}\n`);
+
+     const child = spawn('node', googleArgs, {
+       stdio: 'inherit',
+       cwd: __dirname
+     });
+
+     child.on('close', (code) => {
+       if (code === 0) {
+         console.log('\n구글 검색 완료!');
+       } else {
+         console.error(`\n구글 검색 실패 (code: ${code})`);
+       }
+       process.exit(code);
+     });
+
+     return; // 구글 검색이 끝날 때까지 대기
+   }
+
    // 1시간 후 resume 재시작 예약 (--no-resume 옵션이 없을 때)
-   if (!options.noResume) {
+   if (!options.noResume && !options.autoGoogle) {
      await scheduleResume(options);
    }
 }

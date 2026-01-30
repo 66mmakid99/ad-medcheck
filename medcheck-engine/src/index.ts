@@ -4,6 +4,29 @@
  */
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { logger } from 'hono/logger';
+import { prettyJSON } from 'hono/pretty-json';
+import { secureHeaders } from 'hono/secure-headers';
+import { timing } from 'hono/timing';
+
+import {
+  analyzeRoutes,
+  patternsRoutes,
+  healthRoutes,
+  feedbackRoutes,
+  validationRoutes,
+  falsePositivesRoutes,
+  patternExceptionsRoutes,
+  exceptionSuggestionsRoutes,
+  patternVersionsRoutes,
+  allExceptionsRoutes,
+} from './api/routes';
+import { violationDetector } from './modules/violation-detector';
+import type { D1Database } from './db/d1';
+
+// ============================================
+// 타입 정의
+// ============================================
 
 type Env = {
   DB: D1Database;
@@ -499,66 +522,19 @@ app.get('/v1/mapping-candidates/:id', async (c) => {
   }
 });
 
-// 매핑 승인
-app.post('/v1/mapping-candidates/:id/approve', async (c) => {
-  try {
-    const id = c.req.param('id');
-    const body = await c.req.json();
-    const { procedureId } = body; // 다른 시술로 매핑 가능
-    
-    const candidate = await c.env.DB.prepare(`SELECT * FROM mapping_candidates WHERE id = ?`).bind(id).first() as any;
-    if (!candidate) return c.json({ success: false, error: 'Not found' }, 404);
-    
-    const targetProcedureId = procedureId || candidate.suggested_procedure_id;
-    if (!targetProcedureId) return c.json({ success: false, error: 'No procedure to map' }, 400);
-    
-    // 별칭 생성
-    const aliasId = `PA-${Date.now()}`;
-    await c.env.DB.prepare(`
-      INSERT INTO procedure_aliases 
-      (id, procedure_id, alias_name, normalized_name, alias_type, confidence, 
-       is_verified, verified_at, mapping_candidate_id)
-      VALUES (?, ?, ?, ?, 'marketing', 100, 1, datetime('now'), ?)
-    `).bind(aliasId, targetProcedureId, candidate.alias_name, candidate.normalized_name, id).run();
-    
-    // 후보 상태 업데이트
-    await c.env.DB.prepare(`
-      UPDATE mapping_candidates 
-      SET status = 'approved', reviewed_at = datetime('now'), approved_alias_id = ?
-      WHERE id = ?
-    `).bind(aliasId, id).run();
-    
-    // 기존 "미분류" 가격 재매핑
-    await c.env.DB.prepare(`
-      UPDATE collected_procedure_names 
-      SET mapped_procedure_id = ?, mapped_alias_id = ?, mapping_status = 'auto_mapped', mapping_method = 'alias'
-      WHERE normalized_name = ? AND mapping_status IN ('pending', 'candidate')
-    `).bind(targetProcedureId, aliasId, candidate.normalized_name).run();
-    
-    return c.json({ success: true, data: { aliasId, procedureId: targetProcedureId } });
-  } catch (e: any) {
-    return c.json({ success: false, error: e.message }, 500);
-  }
-});
+// API 라우트 마운트
+app.route('/v1/analyze', analyzeRoutes);
+app.route('/v1/patterns', patternsRoutes);
+app.route('/v1/health', healthRoutes);
+app.route('/v1/feedback', feedbackRoutes);
+app.route('/v1/validations', validationRoutes);
+app.route('/v1/false-positives', falsePositivesRoutes);
+app.route('/v1/exceptions', allExceptionsRoutes);
+app.route('/v1/exception-suggestions', exceptionSuggestionsRoutes);
 
-// 매핑 거절
-app.post('/v1/mapping-candidates/:id/reject', async (c) => {
-  try {
-    const id = c.req.param('id');
-    const body = await c.req.json();
-    const { reason } = body;
-    
-    await c.env.DB.prepare(`
-      UPDATE mapping_candidates 
-      SET status = 'rejected', reviewed_at = datetime('now'), rejection_reason = ?
-      WHERE id = ?
-    `).bind(reason || null, id).run();
-    
-    return c.json({ success: true, data: { id, status: 'rejected' } });
-  } catch (e: any) {
-    return c.json({ success: false, error: e.message }, 500);
-  }
-});
+// 패턴별 라우트 (중첩)
+app.route('/v1/patterns/:patternId/exceptions', patternExceptionsRoutes);
+app.route('/v1/patterns/:patternId/versions', patternVersionsRoutes);
 
 // ============================================
 // 🔔 가격 변동 알림 API

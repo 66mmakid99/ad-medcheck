@@ -1,8 +1,12 @@
 /**
- * 병원 URL 수집 + 분석 파이프라인
+ * 병원 URL 수집 + 분석 파이프라인 v2.0
  * 1단계: 네이버 플레이스 검색
  * 2단계: 구글 검색 (네이버에서 못 찾은 병원)
  * 3단계: MedCheck Engine 분석 (위반 탐지)
+ *
+ * 🆕 대시보드 실시간 연동:
+ * - 크롤링 상태 실시간 업데이트
+ * - 분석 결과 API 자동 전송
  */
 
 const { spawn } = require('child_process');
@@ -18,10 +22,82 @@ const API_BASE = process.env.MEDCHECK_API || 'https://medcheck-engine.mmakid.wor
 const ANALYZE_DELAY_MS = 2000;  // 분석 간 딜레이 (2초)
 const ANALYZE_BATCH_SIZE = 10;  // 배치 크기
 
+// 파이프라인 상태
+let currentJobId = null;
+let currentSessionId = null;
+
 /**
  * Sleep 함수
  */
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * 🆕 크롤링 상태 업데이트 (대시보드 실시간)
+ */
+async function updateCrawlStatus(status) {
+  if (!currentJobId) {
+    currentJobId = `PIPELINE-${Date.now()}`;
+  }
+
+  try {
+    await axios.post(`${API_BASE}/v1/crawl-status`, {
+      jobId: currentJobId,
+      jobType: status.jobType || 'full_pipeline',
+      status: status.status || 'running',
+      progress: status.progress || 0,
+      total: status.total || 0,
+      found: status.found || 0,
+      failed: status.failed || 0,
+      currentItem: status.currentItem || null,
+      startedAt: status.startedAt || new Date().toISOString(),
+      message: status.message || null
+    }, { timeout: 5000 });
+  } catch (e) {
+    // API 오류는 무시 (로컬 실행 계속)
+  }
+}
+
+/**
+ * 🆕 크롤링 세션 생성
+ */
+async function createCrawlSession(sessionType, targetSido) {
+  try {
+    const res = await axios.post(`${API_BASE}/v1/crawl-sessions`, {
+      sessionType,
+      targetSido,
+      targetRegion: ''
+    }, { timeout: 5000 });
+
+    if (res.data.success) {
+      currentSessionId = res.data.data.sessionId;
+      return currentSessionId;
+    }
+  } catch (e) {
+    // 세션 생성 실패해도 계속
+  }
+  return null;
+}
+
+/**
+ * 🆕 분석 결과 API 전송
+ */
+async function sendAnalysisResult(result) {
+  try {
+    await axios.post(`${API_BASE}/v1/analysis-results`, {
+      crawlSessionId: currentSessionId,
+      hospitalId: result.hospitalId || null,
+      hospitalName: result.name,
+      urlAnalyzed: result.analyzedUrl,
+      grade: result.grade || '-',
+      violationCount: result.violationCount || 0,
+      summary: result.summary || '',
+      violations: result.violations || [],
+      status: result.status || 'success'
+    }, { timeout: 10000 });
+  } catch (e) {
+    // API 전송 실패해도 계속
+  }
+}
 
 /**
  * 자식 프로세스 실행 (Promise)
@@ -232,11 +308,24 @@ async function main() {
   const startTime = Date.now();
 
   console.log('\n' + '='.repeat(60));
-  console.log('병원 URL 수집 + 분석 파이프라인');
+  console.log('병원 URL 수집 + 분석 파이프라인 v2.0');
   console.log('='.repeat(60));
   console.log(`시작 시간: ${new Date().toLocaleString('ko-KR')}`);
   console.log(`입력 파일: ${options.input}`);
   console.log(`AI 분석: ${options.enableAi ? 'ON' : 'OFF'}`);
+  console.log(`대시보드 연동: ${API_BASE}`);
+
+  // 🆕 세션 생성 및 초기 상태 전송
+  const sido = options.input.match(/서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주/)?.[0] || '전국';
+  await createCrawlSession('full_pipeline', sido);
+  await updateCrawlStatus({
+    jobType: 'full_pipeline',
+    status: 'running',
+    progress: 0,
+    total: 0,
+    message: `파이프라인 시작: ${options.input}`,
+    startedAt: new Date().toISOString()
+  });
 
   // 입력 파일 경로 (output/ 중복 방지)
   let inputPath = options.input;
@@ -384,7 +473,7 @@ async function main() {
 
           console.log(`✓ ${data.grade}등급 (위반 ${data.violationCount || 0}건)`);
 
-          analysisResults.push({
+          const resultData = {
             ...hospital,
             analyzedUrl: urlToAnalyze,
             grade: data.grade,
@@ -392,12 +481,16 @@ async function main() {
             summary: data.summary || '',
             violations: data.violations || [],
             status: 'success'
-          });
+          };
+          analysisResults.push(resultData);
+
+          // 🆕 분석 결과 API 전송
+          await sendAnalysisResult(resultData);
         } else {
           failed++;
           console.log(`✗ ${result.error || 'analysis failed'}`);
 
-          analysisResults.push({
+          const resultData = {
             ...hospital,
             analyzedUrl: urlToAnalyze,
             grade: '-',
@@ -405,13 +498,15 @@ async function main() {
             summary: result.error || 'Analysis failed',
             violations: [],
             status: 'error'
-          });
+          };
+          analysisResults.push(resultData);
+          await sendAnalysisResult(resultData);
         }
       } catch (err) {
         failed++;
         console.log(`✗ ${err.message}`);
 
-        analysisResults.push({
+        const resultData = {
           ...hospital,
           analyzedUrl: urlToAnalyze,
           grade: '-',
@@ -419,10 +514,26 @@ async function main() {
           summary: err.message,
           violations: [],
           status: 'error'
-        });
+        };
+        analysisResults.push(resultData);
+        await sendAnalysisResult(resultData);
       }
 
       analyzed++;
+
+      // 🆕 실시간 상태 업데이트 (10개마다)
+      if (analyzed % 10 === 0 || analyzed === targetHospitals.length) {
+        await updateCrawlStatus({
+          jobType: 'analysis',
+          status: 'running',
+          progress: analyzed,
+          total: targetHospitals.length,
+          found: success,
+          failed: failed,
+          currentItem: hospital.name,
+          message: `분석 중: ${analyzed}/${targetHospitals.length}`
+        });
+      }
 
       // 딜레이
       if (i < targetHospitals.length - 1) {
@@ -450,29 +561,19 @@ async function main() {
     console.log(`  CSV: ${csvPath}`);
     console.log(`  JSON: ${jsonPath}`);
 
-    // API로 결과 전송 (선택)
-    try {
-      const summaryData = {
+    // 🆕 분석 완료 상태 전송
+    await updateCrawlStatus({
+      jobType: 'analysis',
+      status: 'completed',
+      progress: analyzed,
+      total: analyzed,
+      found: success,
+      failed: failed,
+      message: JSON.stringify({
         timestamp,
-        total: analyzed,
-        success,
-        failed,
         grades: { A: gradeA, B: gradeB, C: gradeC, D: gradeD, F: gradeF }
-      };
-
-      await axios.post(`${API_BASE}/v1/crawl-status`, {
-        jobId: `PIPELINE-${Date.now()}`,
-        jobType: 'full_pipeline',
-        status: 'completed',
-        progress: analyzed,
-        total: analyzed,
-        found: success,
-        failed: failed,
-        message: JSON.stringify(summaryData)
-      }, { timeout: 5000 });
-    } catch (e) {
-      // API 전송 실패해도 계속
-    }
+      })
+    });
   }
 
   // ============================
@@ -485,6 +586,16 @@ async function main() {
   console.log('='.repeat(60));
   console.log(`총 소요 시간: ${elapsed}분`);
   console.log(`종료 시간: ${new Date().toLocaleString('ko-KR')}`);
+  console.log(`대시보드에서 결과를 확인하세요: ${API_BASE.replace('medcheck-engine.mmakid.workers.dev', 'dashboard')}`);
+
+  // 🆕 최종 완료 상태 전송
+  await updateCrawlStatus({
+    jobType: 'full_pipeline',
+    status: 'completed',
+    progress: 100,
+    total: 100,
+    message: `파이프라인 완료 (${elapsed}분 소요)`
+  });
 }
 
 main().catch(err => {

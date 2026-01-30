@@ -330,11 +330,17 @@ async function main() {
      .parse(process.argv);
 
   const options = program.opts();
-  
-  // 입력 파일 확인
-  const inputPath = path.isAbsolute(options.input) 
-    ? options.input 
-    : path.join(OUTPUT_DIR, options.input);
+
+  // 입력 파일 확인 (output/ 중복 방지)
+  let inputPath = options.input;
+  if (!path.isAbsolute(inputPath)) {
+    // output/ 또는 output\으로 시작하면 __dirname 기준으로만 연결
+    if (inputPath.startsWith('output/') || inputPath.startsWith('output\\')) {
+      inputPath = path.join(__dirname, '..', '..', inputPath);
+    } else {
+      inputPath = path.join(OUTPUT_DIR, inputPath);
+    }
+  }
     
   if (!fs.existsSync(inputPath)) {
     console.error(`Input file not found: ${inputPath}`);

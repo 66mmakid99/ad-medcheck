@@ -1,0 +1,29 @@
+{
+  "name": "medcheck-scv",
+  "version": "1.1.0",
+  "description": "Hospital URL crawler for MEDCHECK SCV pipeline with cost optimization",
+  "main": "src/crawler.js",
+  "scripts": {
+    "crawl": "node src/crawler.js",
+    "crawl:seoul": "node src/crawler.js --sido 서울",
+    "crawl:seoul:resume": "node src/crawler.js --sido 서울 --resume",
+    "crawl:metro": "node src/crawler.js --region 수도권",
+    "crawl:metro:resume": "node src/crawler.js --region 수도권 --resume",
+    "crawl:all": "node src/crawler.js --all",
+    "checkpoints:list": "node src/crawler.js --list-checkpoints",
+    "checkpoints:clear": "node src/crawler.js --clear-checkpoints",
+    "stats": "node src/cli/usage-stats.js",
+    "enrich:naver": "node src/enrichers/naver-place.js",
+    "enrich:google": "node src/enrichers/google-search.js"
+  },
+  "keywords": ["crawler", "hospital", "medcheck", "price-analysis"],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.6.0",
+    "commander": "^11.1.0",
+    "xml2js": "^0.6.2",
+    "@anthropic-ai/sdk": "^0.30.0",
+    "cheerio": "^1.0.0"
+  }
+}

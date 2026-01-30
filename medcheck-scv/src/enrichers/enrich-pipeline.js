@@ -238,10 +238,16 @@ async function main() {
   console.log(`입력 파일: ${options.input}`);
   console.log(`AI 분석: ${options.enableAi ? 'ON' : 'OFF'}`);
 
-  // 입력 파일 경로
-  const inputPath = path.isAbsolute(options.input)
-    ? options.input
-    : path.join(OUTPUT_DIR, options.input);
+  // 입력 파일 경로 (output/ 중복 방지)
+  let inputPath = options.input;
+  if (!path.isAbsolute(inputPath)) {
+    // output/으로 시작하면 그대로 사용, 아니면 OUTPUT_DIR 추가
+    if (inputPath.startsWith('output/') || inputPath.startsWith('output\\')) {
+      inputPath = path.join(__dirname, '..', '..', inputPath);
+    } else {
+      inputPath = path.join(OUTPUT_DIR, inputPath);
+    }
+  }
 
   if (!options.analyzeOnly && !fs.existsSync(inputPath)) {
     console.error(`입력 파일 없음: ${inputPath}`);

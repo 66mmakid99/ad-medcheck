@@ -1,21 +1,13 @@
 {
   "name": "medcheck-engine",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
-<<<<<<< Updated upstream
-  "description": "의료광고위반 분석 엔진",
+  "description": "Medical Advertisement Compliance Engine",
   "main": "dist/index.js",
-  "types": "dist/index.d.ts",
   "scripts": {
     "build": "esbuild src/index.ts --bundle --format=esm --platform=neutral --outfile=dist/index.js --external:__STATIC_CONTENT_MANIFEST",
-    "start": "node dist/index.js",
     "dev": "wrangler dev",
-    "dev:local": "wrangler dev --local",
-    "deploy": "wrangler deploy",
-    "deploy:staging": "wrangler deploy --env staging",
-    "deploy:prod": "wrangler deploy --env production",
-    "d1:init": "wrangler d1 execute medcheck-db --local --file=src/db/schema.d1.sql",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "deploy": "npm run build && wrangler deploy"
   },
   "keywords": [
     "medical",
@@ -25,6 +17,9 @@
   ],
   "author": "",
   "license": "ISC",
+  "dependencies": {
+    "hono": "^4.0.0"
+  },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260129.0",
     "@types/node": "^25.1.0",
@@ -32,20 +27,5 @@
     "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "wrangler": "^4.61.1"
-=======
-  "scripts": {
-    "build": "esbuild src/index.ts --bundle --format=esm --platform=neutral --outfile=dist/index.js --external:__STATIC_CONTENT_MANIFEST",
-    "dev": "wrangler dev",
-    "deploy": "npm run build && wrangler deploy"
->>>>>>> Stashed changes
-  },
-  "dependencies": {
-    "hono": "^4.0.0"
-  },
-  "devDependencies": {
-    "@cloudflare/workers-types": "^4.20240117.0",
-    "esbuild": "^0.20.0",
-    "typescript": "^5.3.0",
-    "wrangler": "^3.0.0"
   }
 }

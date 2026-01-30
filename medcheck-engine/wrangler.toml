@@ -2,7 +2,10 @@ name = "medcheck-engine"
 main = "dist/index.js"
 compatibility_date = "2024-01-01"
 compatibility_flags = ["nodejs_compat"]
+<<<<<<< Updated upstream
 no_bundle = true
+=======
+>>>>>>> Stashed changes
 
 account_id = "cef061ba7db7004eee5cb8a22074efb8"
 

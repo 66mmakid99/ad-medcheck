@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS analysis_feedback_v2 (
   original_severity TEXT,
   corrected_severity TEXT,
   context_text TEXT,
-  context_type TEXT CHECK (context_type IN ('negation', 'question', 'quotation', 'disclaimer', 'comparison', 'normal', NULL)),
+  context_type TEXT CHECK (context_type IS NULL OR context_type IN ('negation', 'question', 'quotation', 'disclaimer', 'comparison', 'normal')),
   hospital_department TEXT,
   missed_text TEXT,
   suggested_pattern TEXT,
@@ -165,14 +165,7 @@ CREATE INDEX IF NOT EXISTS idx_pef_created ON price_extraction_feedback(created_
 
 CREATE TABLE IF NOT EXISTS auto_learning_log (
   id TEXT PRIMARY KEY,
-  learning_type TEXT NOT NULL CHECK (learning_type IN (
-    'exception_generated',
-    'confidence_adjusted',
-    'pattern_suggested',
-    'mapping_learned',
-    'severity_adjusted',
-    'context_modifier_updated'
-  )),
+  learning_type TEXT NOT NULL CHECK (learning_type IN ('exception_generated', 'confidence_adjusted', 'pattern_suggested', 'mapping_learned', 'severity_adjusted', 'context_modifier_updated')),
   target_type TEXT NOT NULL CHECK (target_type IN ('pattern', 'mapping', 'exception', 'procedure')),
   target_id TEXT NOT NULL,
   input_data TEXT,
@@ -278,15 +271,14 @@ CREATE TABLE IF NOT EXISTS feedback_settings (
 );
 
 -- 기본 설정값 삽입
-INSERT OR IGNORE INTO feedback_settings (setting_key, setting_value, setting_type, description) VALUES
-  ('accuracy_threshold', '0.8', 'number', '패턴 정확도 경고 임계값'),
-  ('exception_min_occurrences', '5', 'number', '예외 규칙 생성 최소 발생 횟수'),
-  ('exception_min_confidence', '0.85', 'number', '예외 규칙 자동 적용 최소 신뢰도'),
-  ('auto_apply_confidence', '0.95', 'number', '자동 적용 최소 신뢰도'),
-  ('context_modifier_min_samples', '10', 'number', '맥락 신뢰도 조정 최소 샘플 수'),
-  ('performance_aggregation_days', '30', 'number', '성능 집계 기본 기간 (일)'),
-  ('flag_review_period_days', '7', 'number', '플래그된 패턴 검토 기간'),
-  ('learning_expiry_days', '90', 'number', '학습 후보 만료 기간');
+INSERT OR IGNORE INTO feedback_settings (setting_key, setting_value, setting_type, description) VALUES ('accuracy_threshold', '0.8', 'number', '패턴 정확도 경고 임계값');
+INSERT OR IGNORE INTO feedback_settings (setting_key, setting_value, setting_type, description) VALUES ('exception_min_occurrences', '5', 'number', '예외 규칙 생성 최소 발생 횟수');
+INSERT OR IGNORE INTO feedback_settings (setting_key, setting_value, setting_type, description) VALUES ('exception_min_confidence', '0.85', 'number', '예외 규칙 자동 적용 최소 신뢰도');
+INSERT OR IGNORE INTO feedback_settings (setting_key, setting_value, setting_type, description) VALUES ('auto_apply_confidence', '0.95', 'number', '자동 적용 최소 신뢰도');
+INSERT OR IGNORE INTO feedback_settings (setting_key, setting_value, setting_type, description) VALUES ('context_modifier_min_samples', '10', 'number', '맥락 신뢰도 조정 최소 샘플 수');
+INSERT OR IGNORE INTO feedback_settings (setting_key, setting_value, setting_type, description) VALUES ('performance_aggregation_days', '30', 'number', '성능 집계 기본 기간 (일)');
+INSERT OR IGNORE INTO feedback_settings (setting_key, setting_value, setting_type, description) VALUES ('flag_review_period_days', '7', 'number', '플래그된 패턴 검토 기간');
+INSERT OR IGNORE INTO feedback_settings (setting_key, setting_value, setting_type, description) VALUES ('learning_expiry_days', '90', 'number', '학습 후보 만료 기간');
 
 -- ============================================
 -- 10. 뷰: 패턴별 최근 성능 요약
@@ -294,23 +286,21 @@ INSERT OR IGNORE INTO feedback_settings (setting_key, setting_value, setting_typ
 
 CREATE VIEW IF NOT EXISTS v_pattern_performance_summary AS
 SELECT
-  pp.pattern_id,
-  pp.total_matches,
-  pp.true_positives,
-  pp.false_positives,
-  pp.false_negatives,
-  pp.accuracy,
-  pp.precision_score,
-  pp.recall_score,
-  pp.f1_score,
-  pp.is_flagged,
-  pp.flag_reason,
-  pp.last_calculated,
-  (SELECT COUNT(*) FROM exception_candidates ec WHERE ec.pattern_id = pp.pattern_id AND ec.status = 'pending_review') as pending_exceptions,
-  (SELECT COUNT(*) FROM analysis_feedback_v2 af WHERE af.pattern_id = pp.pattern_id AND af.review_status = 'pending') as pending_feedbacks
-FROM pattern_performance pp
-WHERE pp.period_type = 'all_time'
-ORDER BY pp.is_flagged DESC, pp.accuracy ASC;
+  pattern_id,
+  total_matches,
+  true_positives,
+  false_positives,
+  false_negatives,
+  accuracy,
+  precision_score,
+  recall_score,
+  f1_score,
+  is_flagged,
+  flag_reason,
+  last_calculated
+FROM pattern_performance
+WHERE period_type = 'all_time'
+ORDER BY is_flagged DESC, accuracy ASC;
 
 -- ============================================
 -- 11. 뷰: 피드백 통계 요약
@@ -366,28 +356,32 @@ GROUP BY learning_type, target_type;
 -- 14. 트리거: 피드백 업데이트 시 자동 타임스탬프
 -- ============================================
 
-CREATE TRIGGER IF NOT EXISTS trigger_afv2_updated
+DROP TRIGGER IF EXISTS trigger_afv2_updated;
+CREATE TRIGGER trigger_afv2_updated
 AFTER UPDATE ON analysis_feedback_v2
 FOR EACH ROW
 BEGIN
   UPDATE analysis_feedback_v2 SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
-CREATE TRIGGER IF NOT EXISTS trigger_pef_updated
+DROP TRIGGER IF EXISTS trigger_pef_updated;
+CREATE TRIGGER trigger_pef_updated
 AFTER UPDATE ON price_extraction_feedback
 FOR EACH ROW
 BEGIN
   UPDATE price_extraction_feedback SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
-CREATE TRIGGER IF NOT EXISTS trigger_all_updated
+DROP TRIGGER IF EXISTS trigger_all_updated;
+CREATE TRIGGER trigger_all_updated
 AFTER UPDATE ON auto_learning_log
 FOR EACH ROW
 BEGIN
   UPDATE auto_learning_log SET updated_at = datetime('now') WHERE id = NEW.id;
 END;
 
-CREATE TRIGGER IF NOT EXISTS trigger_ec_updated
+DROP TRIGGER IF EXISTS trigger_ec_updated;
+CREATE TRIGGER trigger_ec_updated
 AFTER UPDATE ON exception_candidates
 FOR EACH ROW
 BEGIN
@@ -398,14 +392,17 @@ END;
 -- 15. 트리거: 예외 후보 임계값 도달 시 상태 변경
 -- ============================================
 
-CREATE TRIGGER IF NOT EXISTS trigger_ec_threshold_check
-AFTER UPDATE OF occurrence_count ON exception_candidates
+DROP TRIGGER IF EXISTS trigger_ec_threshold_check;
+CREATE TRIGGER trigger_ec_threshold_check
+AFTER UPDATE ON exception_candidates
 FOR EACH ROW
-WHEN NEW.occurrence_count >= 5 AND NEW.status = 'collecting' AND NEW.meets_threshold = 0
 BEGIN
   UPDATE exception_candidates
   SET meets_threshold = 1,
       threshold_met_at = datetime('now'),
       status = 'pending_review'
-  WHERE id = NEW.id;
+  WHERE id = NEW.id
+    AND NEW.occurrence_count >= 5
+    AND NEW.status = 'collecting'
+    AND NEW.meets_threshold = 0;
 END;

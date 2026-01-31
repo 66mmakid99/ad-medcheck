@@ -52,16 +52,28 @@ ad-medcheck/
 │   │   │   ├── logger.ts
 │   │   │   └── tracer.ts
 │   │   ├── modules/
-│   │   │   ├── violation-detector/
+│   │   │   ├── violation-detector/     # 위반 탐지 모듈 (v2.0)
+│   │   │   │   ├── index.ts            # 통합 탐지기
+│   │   │   │   ├── pattern-matcher.ts  # 패턴 매칭 + 오탐방지
+│   │   │   │   ├── rule-engine.ts      # 규칙 엔진
+│   │   │   │   ├── compound-detector.ts # 복합 위반 탐지
+│   │   │   │   ├── department-rules.ts  # 진료과목별 규칙
+│   │   │   │   └── impression-analyzer.ts # 인상 분석
+│   │   │   ├── mandatory-checker/      # 필수 기재사항 검사
+│   │   │   │   └── index.ts
+│   │   │   ├── ocr-analyzer/           # OCR 분석 (6단계 구현)
 │   │   │   │   ├── index.ts
-│   │   │   │   ├── pattern-matcher.ts
-│   │   │   │   └── rule-engine.ts
+│   │   │   │   ├── preprocessing.ts
+│   │   │   │   ├── text-extraction.ts
+│   │   │   │   ├── medical-term-recognizer.ts
+│   │   │   │   ├── image-categorizer.ts
+│   │   │   │   └── types.ts
 │   │   │   └── ai-analyzer/
 │   │   │       ├── index.ts
-│   │   │       ├── context-analyzer.ts
+│   │   │       ├── context-analyzer.ts # 문맥 분석 강화
 │   │   │       └── llm-client.ts
 │   │   ├── adapters/
-│   │   │   ├── ocr-adapter.ts     # OCR interface (NOT IMPLEMENTED)
+│   │   │   ├── ocr-adapter.ts     # OCR 어댑터 (구현 완료)
 │   │   │   └── scv-adapter.ts
 │   │   └── db/
 │   │       ├── d1.ts
@@ -325,9 +337,9 @@ cd medcheck-scv && npm run crawl:seoul
 | Gemini Flash | ~₩1.1 |
 
 ### Current Status
-- Pattern matching: Fully implemented
+- Pattern matching: Fully implemented (v2.0 with false positive prevention)
 - AI analysis: Implemented but NOT tested for accuracy
-- OCR: Interface only (NOT IMPLEMENTED)
+- OCR: Fully implemented (6-phase pipeline with Google Vision API)
 
 ---
 
@@ -368,15 +380,107 @@ cd medcheck-scv && npm run crawl:seoul
 - Auto pipeline (Naver → Google → Analysis)
 - Dashboard deployment (Cloudflare Pages)
 - Real-time dashboard integration (5s polling)
+- **OCR 이미지 분석 시스템** (2026-01-31)
+  - 6단계 파이프라인: 전처리→텍스트추출→의료용어인식→카테고리분류→분석→리포트
+  - Google Cloud Vision API 통합
+  - 의료광고 특화 전처리 (before/after, 가격표 등)
+- **위반 탐지 분석 강화** (2026-01-31)
+  - 오탐 방지: 8가지 문맥 예외 처리 (부정어, 질문, 면책, 법적고지 등)
+  - 복합 위반 탐지: AND/OR/AND_NOT/SEQUENCE 연산자, 9개 규칙
+  - 진료과목별 특화: 9개 진료과목 (피부과, 성형외과, 치과 등)
+  - 전체 인상 분석: 어조/신뢰도/위험도 평가
+  - 필수 기재사항 검사: 의료기관명, 연락처, 소재지 등
 
 ### In Progress
 - AI Hybrid analysis testing
 - Trick pattern collection
 
 ### Not Implemented
-- OCR (interface only)
 - AI accuracy verification
 - CSV output format improvement (user fixing)
+
+---
+
+## Violation Detector v2.0 (위반 탐지 강화 시스템)
+
+### Overview
+95% 정확도 목표로 구현된 통합 위반 탐지 시스템
+
+### Modules
+
+#### 1. Pattern Matcher (오탐 방지 강화)
+| 문맥 예외 타입 | 설명 | 예시 |
+|--------------|------|------|
+| NEGATION_BEFORE | 앞에 부정어 | "절대 100% 완치라고 하면 안 됩니다" |
+| NEGATION_AFTER | 뒤에 부정어 | "100% 완치는 불가능합니다" |
+| DISCLAIMER | 면책 조항 | "개인에 따라 효과가 다를 수 있습니다" |
+| QUESTION | 의문문 | "100% 완치가 가능한가요?" |
+| QUOTATION | 인용문 | "'100% 완치'라는 표현은 위반입니다" |
+| LEGAL_NOTICE | 법적 고지 | "의료법에 따라 100%라는 표현은 금지" |
+| NEGATIVE_EXAMPLE | 부정적 예시 | "다음은 위반 사례: 100% 완치 보장" |
+| CONDITIONAL | 조건문 | "만약 100% 완치를 약속하면 위반" |
+
+#### 2. Compound Detector (복합 위반)
+| 규칙 ID | 설명 | 연산자 |
+|--------|------|--------|
+| CPD-001 | 가격유인 + 효과보장 | AND |
+| CPD-002 | 전후사진 + 결과보장 | AND |
+| CPD-003 | 최상급 + 비교광고 | OR |
+| CPD-004 | 무통/무흉터 + 확정표현 | AND_NOT |
+| CPD-005 | 시술순서 패턴 | SEQUENCE |
+
+#### 3. Department Rules (진료과목별 규칙)
+| 진료과목 | 특화 규칙 예시 |
+|---------|--------------|
+| dermatology | 피부재생/탄력/미백 보장 금지 |
+| plastic_surgery | 자연스러운 결과 보장 금지 |
+| dental | 임플란트 수명 보장 금지 |
+| oriental | 한방치료 효과 과장 금지 |
+| psychiatry | 정신건강 치료 보장 금지 |
+
+#### 4. Impression Analyzer (전체 인상 분석)
+| 분석 항목 | 등급 |
+|----------|------|
+| Tone | PROFESSIONAL, PROMOTIONAL, AGGRESSIVE, SENSATIONAL |
+| Credibility | HIGH, MEDIUM, LOW, SUSPICIOUS |
+| Risk Level | SAFE, LOW, MEDIUM, HIGH, CRITICAL |
+
+#### 5. Mandatory Checker (필수 기재사항)
+| 항목 | 필수 여부 |
+|------|----------|
+| 의료기관명 | 필수 |
+| 전화번호 | 필수 |
+| 소재지/주소 | 필수 |
+| 진료과목 | 권장 |
+| 전문의 자격 | 권장 |
+
+### API Usage
+```typescript
+// 전체 분석
+POST /v1/analyze
+{
+  "text": "분석할 텍스트",
+  "options": {
+    "enableExtendedAnalysis": true,
+    "enableCompoundDetection": true,
+    "enableDepartmentRules": true,
+    "enableImpressionAnalysis": true,
+    "enableMandatoryCheck": true
+  }
+}
+
+// 응답에 포함되는 항목
+{
+  "matches": [...],           // 패턴 매칭 결과
+  "judgment": {...},          // 위반 판정
+  "compoundViolations": [...],// 복합 위반
+  "departmentViolations": [...],// 진료과목별 위반
+  "impressionAnalysis": {...},// 인상 분석
+  "mandatoryCheck": {...},    // 필수 기재사항
+  "overallRiskScore": 75,     // 종합 위험 점수
+  "overallComplianceScore": 65// 규정 준수 점수
+}
+```
 
 ---
 
@@ -417,18 +521,18 @@ Example: P-56-01-001
 
 1. **CSV Output Format**: User is fixing manually
 2. **AI Analysis Testing**: Accuracy not verified (Pattern vs AI Hybrid)
-3. **OCR Not Implemented**: Need Google Vision or similar integration
 
 ---
 
 ## Recent Commits
 
 ```
+2304d71 feat: 위반 탐지 분석 강화 시스템 완전 구현
+ff9db4b fix: SQL 마이그레이션 문법 수정
+58550e2 chore: update package-lock.json
+d66aec2 feat: OCR 이미지 분석 시스템 완전 구현 (Phase 1-6)
+8779109 docs: CLAUDE.md 전체 업데이트 - 배포URL, 대시보드, 파이프라인, API 문서화
 2447982 feat: 자동 파이프라인 완성 (네이버→구글→분석 연속 실행)
-83c1bf9 feat: 대시보드 실시간 연동 + 분석결과/크롤링현황 탭 추가
-5c4013f fix: output/ 경로 중복 버그 수정
-fd9097a fix: prevent output/ path duplication in pipeline
-4799d3a feat: extend pipeline with MedCheck Engine analysis (3-step)
 ```
 
 ---

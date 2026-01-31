@@ -4,7 +4,7 @@
 
 **AD-MEDCHECK (MADMEDCHECK)** is a Medical Advertisement Compliance Analysis System for Korean medical advertisements. It automatically detects and analyzes potential violations of Korean medical advertising laws (의료법) and related regulations.
 
-**Current Version:** Engine v1.4.0 / Dashboard v1.3.0
+**Current Version:** Engine v1.4.0 / Dashboard v1.4.0
 **Language:** Korean (한국어) with English documentation
 **License:** ISC
 **Last Updated:** 2026-01-31
@@ -131,7 +131,7 @@ ad-medcheck/
 
 ---
 
-## Dashboard Features (10 Tabs)
+## Dashboard Features (14 Tabs)
 
 | Tab | Name | Description |
 |-----|------|-------------|
@@ -145,6 +145,10 @@ ad-medcheck/
 | 🔄 | Mapping Approval | Approve/reject unmapped procedure names |
 | ⚠️ | Exceptions/FP | False positive stats, exception suggestions |
 | 🎭 | Tricks | Evasion pattern management |
+| 📥 | Feedback | User feedback collection, approve/reject (v1.4.0) |
+| 📈 | Performance | Pattern accuracy tracking, flagged patterns (v1.4.0) |
+| 🔧 | Improvements | Learning candidates, exception candidates (v1.4.0) |
+| 📜 | History | Improvement history timeline (v1.4.0) |
 
 ---
 

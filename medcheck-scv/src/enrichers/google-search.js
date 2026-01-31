@@ -284,6 +284,7 @@ async function main() {
     .option('--resume', 'Resume from checkpoint')
     .option('--limit <n>', 'Limit number of hospitals', parseInt)
     .option('--skip-existing', 'Skip hospitals with existing homepage/naver URL')
+    .option('--auto-analyze', 'Automatically run MedCheck analysis after completion')
     .parse(process.argv);
 
   const options = program.opts();
@@ -390,6 +391,40 @@ async function main() {
   console.log(`발견: ${found}개 (${(found/targetHospitals.length*100).toFixed(1)}%)`);
   console.log(`미발견: ${notFound}개`);
   console.log(`저장: ${outputPath}`);
+
+  // 🆕 자동 분석 실행
+  if (options.autoAnalyze) {
+    console.log('\n' + '='.repeat(60));
+    console.log('🔍 MedCheck 분석 자동 실행...');
+    console.log('='.repeat(60));
+
+    const { spawn } = require('child_process');
+    const pipelineScript = path.join(__dirname, 'enrich-pipeline.js');
+
+    const child = spawn('node', [
+      pipelineScript,
+      '--input', outputPath,
+      '--skip-naver',
+      '--skip-google'
+    ], {
+      stdio: 'inherit',
+      cwd: __dirname
+    });
+
+    child.on('close', (code) => {
+      if (code === 0) {
+        console.log('\n✅ 전체 파이프라인 완료!');
+      } else {
+        console.error(`\n❌ 분석 실패 (코드: ${code})`);
+      }
+      process.exit(code);
+    });
+
+    child.on('error', (err) => {
+      console.error('분석 실행 오류:', err.message);
+      process.exit(1);
+    });
+  }
 }
 
 main().catch(err => {

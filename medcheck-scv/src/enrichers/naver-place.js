@@ -505,7 +505,8 @@ async function main() {
      const googleArgs = [
        googleScript,
        '--input', outputPath,
-       '--skip-existing'
+       '--skip-existing',
+       '--auto-analyze'  // 🆕 구글 검색 후 자동으로 분석 실행
      ];
 
      if (options.limit) googleArgs.push('--limit', options.limit.toString());

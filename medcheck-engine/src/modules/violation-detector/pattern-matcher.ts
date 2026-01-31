@@ -1,9 +1,122 @@
 /**
  * 패턴 매칭 엔진
  * patterns.json의 정규식 패턴을 사용하여 텍스트에서 위반 패턴 탐지
+ *
+ * 오탐 방지 강화:
+ * - 맥락 예외 처리 (부정문, 면책조항, 질문문 등)
+ * - 문장 내 중복 제거
+ * - 신뢰도 기반 필터링
  */
 
 import patternsData from '../../../patterns/patterns.json';
+
+// ============================================
+// 맥락 예외 정의 (오탐 방지)
+// ============================================
+
+/**
+ * 맥락 예외 유형
+ */
+export type ContextExceptionType =
+  | 'NEGATION_BEFORE'   // 앞에 부정어
+  | 'NEGATION_AFTER'    // 뒤에 부정어
+  | 'DISCLAIMER'        // 면책조항
+  | 'QUESTION'          // 질문문
+  | 'QUOTATION'         // 인용문
+  | 'LEGAL_NOTICE'      // 법적 고지
+  | 'NEGATIVE_EXAMPLE'  // 부정적 예시
+  | 'CONDITIONAL';      // 조건문
+
+/**
+ * 맥락 예외 정의
+ */
+interface ContextException {
+  type: ContextExceptionType;
+  patterns: RegExp[];
+  description: string;
+}
+
+/**
+ * 맥락 예외 패턴 목록
+ */
+const CONTEXT_EXCEPTIONS: ContextException[] = [
+  {
+    type: 'NEGATION_BEFORE',
+    patterns: [
+      /(?:절대|결코|전혀|도저히|절대로)\s*.{0,10}$/,
+      /(?:~?하지\s*않|~?않|~?아니|~?못)\s*.{0,5}$/,
+      /(?:금지|불가|불법|위반)\s*.{0,5}$/,
+    ],
+    description: '앞에 부정어가 있어 위반 의도가 아님',
+  },
+  {
+    type: 'NEGATION_AFTER',
+    patterns: [
+      /^.{0,10}(?:하지\s*않습니다|않습니다|아닙니다|없습니다)/,
+      /^.{0,10}(?:금지|불가능|불법입니다)/,
+      /^.{0,5}(?:은|는)\s*(?:아닙니다|없습니다)/,
+    ],
+    description: '뒤에 부정어가 있어 위반 의도가 아님',
+  },
+  {
+    type: 'DISCLAIMER',
+    patterns: [
+      /(?:개인\s*차이|개인차|차이가\s*있|결과가\s*다를)/,
+      /(?:부작용|이상반응)\s*(?:이|가)\s*(?:있을|발생|나타날)/,
+      /(?:전문의|의사)\s*(?:와|과)\s*(?:상담|상의)/,
+      /(?:사전\s*)?(?:상담|검사|진단)\s*(?:이|가)\s*(?:필요|필수)/,
+    ],
+    description: '면책조항 또는 경고문구',
+  },
+  {
+    type: 'QUESTION',
+    patterns: [
+      /^.{0,30}(?:\?|인가요|일까요|할까요|할까|인가|일까)$/,
+      /(?:어떤|무엇|어떻게|왜|언제)\s*.{0,20}$/,
+      /^(?:혹시|과연|정말)\s*/,
+    ],
+    description: '질문 형태의 문장',
+  },
+  {
+    type: 'QUOTATION',
+    patterns: [
+      /[""''].*[""'']/,
+      /「.*」/,
+      /『.*』/,
+      /(?:라고|하고)\s*(?:말씀|말|언급|표현)/,
+    ],
+    description: '다른 출처를 인용하는 문장',
+  },
+  {
+    type: 'LEGAL_NOTICE',
+    patterns: [
+      /의료법\s*제?\s*\d+조/,
+      /(?:법률|법령|규정)\s*(?:에\s*따라|에\s*의해|상)/,
+      /(?:식약처|복지부|보건복지부)\s*(?:지침|가이드|규정)/,
+      /(?:허가|인가|승인)\s*(?:받은|된|사항)/,
+    ],
+    description: '법적 고지 또는 규정 안내',
+  },
+  {
+    type: 'NEGATIVE_EXAMPLE',
+    patterns: [
+      /(?:이런\s*표현|이러한\s*표현)\s*(?:은|는)\s*(?:안|금지|불가)/,
+      /(?:위반\s*)?(?:사례|예시|예)(?:입니다|임|:)/,
+      /(?:잘못된|불법|부당한)\s*(?:광고|표현|예시)/,
+      /(?:하면\s*안|해서는\s*안|하지\s*마)/,
+    ],
+    description: '잘못된 예시로 제시된 경우',
+  },
+  {
+    type: 'CONDITIONAL',
+    patterns: [
+      /(?:만약|가령|예를\s*들어|예컨대)\s*/,
+      /(?:경우|상황)\s*(?:에는|에서는|라면)/,
+      /~?(?:ㄴ다면|한다면|라면|면)\s/,
+    ],
+    description: '조건문 또는 가정 상황',
+  },
+];
 
 // ============================================
 // 타입 정의
@@ -41,6 +154,14 @@ export interface PatternMatch {
   legalBasis: string;
   description: string;
   suggestion: string;
+  /** 맥락 예외 정보 (예외 감지 시) */
+  contextException?: {
+    type: ContextExceptionType;
+    description: string;
+    isFiltered: boolean;
+  };
+  /** 문장 단위 고유 ID */
+  sentenceId?: number;
 }
 
 /**
@@ -57,6 +178,14 @@ export interface MatchOptions {
   contextLength?: number;
   /** 최대 매칭 수 */
   maxMatches?: number;
+  /** 맥락 예외 필터링 활성화 (기본: true) */
+  enableContextExceptionFilter?: boolean;
+  /** 문장 내 중복 제거 활성화 (기본: true) */
+  enableSentenceDedup?: boolean;
+  /** 최소 신뢰도 (이하는 필터링) */
+  minConfidence?: number;
+  /** 맥락 예외 검사 범위 (앞뒤 문자 수) */
+  contextExceptionRange?: number;
 }
 
 // ============================================
@@ -97,11 +226,20 @@ export class PatternMatcher {
       minSeverity,
       contextLength = 50,
       maxMatches = 100,
+      enableContextExceptionFilter = true,
+      enableSentenceDedup = true,
+      minConfidence = 0,
+      contextExceptionRange = 30,
     } = options;
 
-    const matches: PatternMatch[] = [];
+    let matches: PatternMatch[] = [];
     const severityOrder = { critical: 3, major: 2, minor: 1 };
     const minSeverityValue = minSeverity ? severityOrder[minSeverity] : 0;
+
+    // 문장 경계 분석 (중복 제거용)
+    const sentenceBoundaries = enableSentenceDedup
+      ? this.findSentenceBoundaries(text)
+      : [];
 
     // 검사 대상 패턴 필터링
     let targetPatterns = this.patterns;
@@ -136,7 +274,7 @@ export class PatternMatcher {
         const position = match.index;
         const endPosition = position + matchedText.length;
 
-        // 예외 패턴 체크
+        // 예외 패턴 체크 (기존)
         if (pattern.exceptions && pattern.exceptions.length > 0) {
           const isException = this.checkExceptions(
             text,
@@ -151,13 +289,41 @@ export class PatternMatcher {
         const context = this.extractContext(text, position, endPosition, contextLength);
 
         // 신뢰도 계산
-        const confidence = this.calculateConfidence(pattern, matchedText, context);
+        let confidence = this.calculateConfidence(pattern, matchedText, context);
+
+        // 맥락 예외 검사 (오탐 방지)
+        let contextException: PatternMatch['contextException'] | undefined;
+        if (enableContextExceptionFilter) {
+          const exceptionCheck = this.checkContextExceptions(
+            text,
+            position,
+            endPosition,
+            contextExceptionRange
+          );
+          if (exceptionCheck) {
+            contextException = {
+              type: exceptionCheck.type,
+              description: exceptionCheck.description,
+              isFiltered: true,
+            };
+            // 맥락 예외 감지 시 신뢰도 대폭 감소
+            confidence = confidence * 0.3;
+          }
+        }
+
+        // 최소 신뢰도 필터링
+        if (confidence < minConfidence) continue;
 
         // 중복 체크 (같은 위치에 여러 패턴 매칭 방지)
         const isDuplicate = matches.some(
           m => m.position === position && m.matchedText === matchedText
         );
         if (isDuplicate) continue;
+
+        // 문장 ID 할당
+        const sentenceId = enableSentenceDedup
+          ? this.findSentenceId(position, sentenceBoundaries)
+          : undefined;
 
         matches.push({
           patternId: pattern.id,
@@ -172,8 +338,20 @@ export class PatternMatcher {
           legalBasis: pattern.legalBasis,
           description: pattern.description,
           suggestion: pattern.suggestion,
+          contextException,
+          sentenceId,
         });
       }
+    }
+
+    // 맥락 예외로 필터된 항목 제거 (옵션에 따라)
+    if (enableContextExceptionFilter) {
+      matches = matches.filter(m => !m.contextException?.isFiltered);
+    }
+
+    // 문장 내 중복 제거
+    if (enableSentenceDedup) {
+      matches = this.deduplicateInSentence(matches);
     }
 
     // 위치 순으로 정렬
@@ -249,6 +427,214 @@ export class PatternMatcher {
 
     // 최대 0.95로 제한
     return Math.min(0.95, confidence);
+  }
+
+  /**
+   * 맥락 예외 검사 (오탐 방지)
+   * 매칭된 텍스트 주변의 맥락을 분석하여 실제 위반이 아닌 경우 필터링
+   */
+  private checkContextExceptions(
+    text: string,
+    position: number,
+    endPosition: number,
+    range: number
+  ): ContextException | null {
+    // 앞 맥락 추출
+    const beforeStart = Math.max(0, position - range);
+    const beforeText = text.slice(beforeStart, position);
+
+    // 뒤 맥락 추출
+    const afterEnd = Math.min(text.length, endPosition + range);
+    const afterText = text.slice(endPosition, afterEnd);
+
+    // 전체 맥락 (문장 단위로 확장)
+    const sentenceStart = this.findSentenceStart(text, position);
+    const sentenceEnd = this.findSentenceEnd(text, endPosition);
+    const fullContext = text.slice(sentenceStart, sentenceEnd);
+
+    for (const exception of CONTEXT_EXCEPTIONS) {
+      for (const pattern of exception.patterns) {
+        let matched = false;
+
+        switch (exception.type) {
+          case 'NEGATION_BEFORE':
+            // 앞에 부정어가 있는지 확인
+            matched = pattern.test(beforeText);
+            break;
+
+          case 'NEGATION_AFTER':
+            // 뒤에 부정어가 있는지 확인
+            matched = pattern.test(afterText);
+            break;
+
+          case 'DISCLAIMER':
+          case 'LEGAL_NOTICE':
+          case 'NEGATIVE_EXAMPLE':
+            // 전체 문장에서 면책/법적 고지/부정적 예시 확인
+            matched = pattern.test(fullContext);
+            break;
+
+          case 'QUESTION':
+            // 문장 전체가 질문인지 확인
+            matched = pattern.test(fullContext);
+            break;
+
+          case 'QUOTATION':
+            // 인용문 내에 있는지 확인
+            matched = this.isInsideQuotation(text, position, endPosition);
+            break;
+
+          case 'CONDITIONAL':
+            // 조건문 앞에 있는지 확인
+            matched = pattern.test(beforeText) || pattern.test(fullContext);
+            break;
+        }
+
+        if (matched) {
+          return exception;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
+   * 인용문 내에 있는지 확인
+   */
+  private isInsideQuotation(text: string, start: number, end: number): boolean {
+    const quotePairs = [
+      ['"', '"'],
+      ["'", "'"],
+      ['"', '"'],
+      ['\u2018', '\u2019'],  // ' and '
+      ['「', '」'],
+      ['『', '』'],
+    ];
+
+    for (const [open, close] of quotePairs) {
+      // 시작 위치 이전에 열린 따옴표가 있고, 끝 위치 이후에 닫는 따옴표가 있는지 확인
+      const textBefore = text.slice(0, start);
+      const textAfter = text.slice(end);
+
+      const openCount = (textBefore.match(new RegExp(this.escapeRegex(open), 'g')) || []).length;
+      const closeCount = (textBefore.match(new RegExp(this.escapeRegex(close), 'g')) || []).length;
+
+      // 열린 따옴표가 닫힌 따옴표보다 많고, 뒤에 닫는 따옴표가 있으면 인용문 내부
+      if (openCount > closeCount && textAfter.includes(close)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * 정규식 특수문자 이스케이프
+   */
+  private escapeRegex(str: string): string {
+    return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  /**
+   * 문장 시작 위치 찾기
+   */
+  private findSentenceStart(text: string, position: number): number {
+    const sentenceEnders = /[.!?。！？\n]/;
+    for (let i = position - 1; i >= 0; i--) {
+      if (sentenceEnders.test(text[i])) {
+        return i + 1;
+      }
+    }
+    return 0;
+  }
+
+  /**
+   * 문장 끝 위치 찾기
+   */
+  private findSentenceEnd(text: string, position: number): number {
+    const sentenceEnders = /[.!?。！？\n]/;
+    for (let i = position; i < text.length; i++) {
+      if (sentenceEnders.test(text[i])) {
+        return i + 1;
+      }
+    }
+    return text.length;
+  }
+
+  /**
+   * 문장 경계 찾기
+   */
+  private findSentenceBoundaries(text: string): number[] {
+    const boundaries: number[] = [0];
+    const sentenceEnders = /[.!?。！？\n]/g;
+
+    let match: RegExpExecArray | null;
+    while ((match = sentenceEnders.exec(text)) !== null) {
+      boundaries.push(match.index + 1);
+    }
+
+    if (boundaries[boundaries.length - 1] !== text.length) {
+      boundaries.push(text.length);
+    }
+
+    return boundaries;
+  }
+
+  /**
+   * 위치가 속한 문장 ID 찾기
+   */
+  private findSentenceId(position: number, boundaries: number[]): number {
+    for (let i = 0; i < boundaries.length - 1; i++) {
+      if (position >= boundaries[i] && position < boundaries[i + 1]) {
+        return i;
+      }
+    }
+    return boundaries.length - 1;
+  }
+
+  /**
+   * 문장 내 중복 제거
+   * 같은 문장에서 같은 카테고리의 여러 매칭이 있으면 가장 신뢰도 높은 것만 유지
+   */
+  private deduplicateInSentence(matches: PatternMatch[]): PatternMatch[] {
+    if (matches.length === 0) return matches;
+
+    // 문장별로 그룹화
+    const bySentence = new Map<number, PatternMatch[]>();
+    for (const match of matches) {
+      const sentenceId = match.sentenceId ?? 0;
+      if (!bySentence.has(sentenceId)) {
+        bySentence.set(sentenceId, []);
+      }
+      bySentence.get(sentenceId)!.push(match);
+    }
+
+    const result: PatternMatch[] = [];
+
+    for (const [, sentenceMatches] of bySentence) {
+      // 문장 내에서 카테고리별로 그룹화
+      const byCategory = new Map<string, PatternMatch[]>();
+      for (const match of sentenceMatches) {
+        if (!byCategory.has(match.category)) {
+          byCategory.set(match.category, []);
+        }
+        byCategory.get(match.category)!.push(match);
+      }
+
+      // 각 카테고리에서 가장 신뢰도 높은 것 선택
+      for (const [, categoryMatches] of byCategory) {
+        if (categoryMatches.length === 1) {
+          result.push(categoryMatches[0]);
+        } else {
+          // 신뢰도 순으로 정렬하고 가장 높은 것 선택
+          categoryMatches.sort((a, b) => b.confidence - a.confidence);
+          result.push(categoryMatches[0]);
+        }
+      }
+    }
+
+    return result;
   }
 
   /**

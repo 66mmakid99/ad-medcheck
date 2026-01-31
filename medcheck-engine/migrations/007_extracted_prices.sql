@@ -4,17 +4,17 @@
 -- 1. 이미지 OCR 결과 테이블
 CREATE TABLE IF NOT EXISTS ocr_results (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  hospital_id INTEGER,                    -- hospitals.id 참조 (옵션)
-  image_url TEXT NOT NULL,                -- 원본 이미지 URL
-  source_url TEXT,                        -- 이미지 출처 페이지 URL
-  classification_type TEXT,               -- PRICE_MENU, EVENT, PROMOTION, NOTICE, BEFORE_AFTER, REVIEW, IRRELEVANT
-  classification_confidence REAL,         -- 분류 신뢰도 (0-1)
-  extracted_text TEXT,                    -- 추출된 전체 텍스트
-  text_confidence REAL,                   -- 텍스트 추출 신뢰도
-  visual_emphasis TEXT,                   -- JSON: VisualEmphasis 데이터
-  violations TEXT,                        -- JSON: ImageViolation[] 데이터
-  processing_time_ms INTEGER,             -- 처리 시간 (ms)
-  error_message TEXT,                     -- 오류 메시지 (실패 시)
+  hospital_id INTEGER,
+  image_url TEXT NOT NULL,
+  source_url TEXT,
+  classification_type TEXT,
+  classification_confidence REAL,
+  extracted_text TEXT,
+  text_confidence REAL,
+  visual_emphasis TEXT,
+  violations TEXT,
+  processing_time_ms INTEGER,
+  error_message TEXT,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (hospital_id) REFERENCES hospitals(id) ON DELETE SET NULL
 );
@@ -22,26 +22,26 @@ CREATE TABLE IF NOT EXISTS ocr_results (
 -- 2. 추출된 가격 정보 테이블
 CREATE TABLE IF NOT EXISTS extracted_prices (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ocr_result_id INTEGER NOT NULL,         -- ocr_results.id 참조
-  hospital_id INTEGER,                    -- hospitals.id 참조 (옵션)
-  procedure_name TEXT NOT NULL,           -- 시술명 (원본)
-  normalized_procedure TEXT,              -- 정규화된 시술명
-  procedure_id INTEGER,                   -- procedures.id 참조 (매핑된 경우)
-  price INTEGER NOT NULL,                 -- 가격 (원)
-  original_price INTEGER,                 -- 할인 전 원가
-  discount_rate REAL,                     -- 할인율 (%)
-  shots INTEGER,                          -- 샷/회 수
-  area TEXT,                              -- 부위
-  price_type TEXT NOT NULL,               -- FIXED, FROM, RANGE, DISCOUNTED, NEGOTIABLE
-  original_text TEXT,                     -- 원본 가격 텍스트
-  extraction_confidence REAL,             -- 추출 신뢰도 (0-1)
-  price_per_unit INTEGER,                 -- 단위당 가격 계산값
-  is_promotion INTEGER DEFAULT 0,         -- 프로모션 여부 (0/1)
-  has_time_limit INTEGER DEFAULT 0,       -- 기간 한정 여부 (0/1)
-  conditions TEXT,                        -- 조건 텍스트
-  validation_status TEXT,                 -- COMPLIANT, VIOLATION, PENDING
-  validation_result TEXT,                 -- JSON: PriceAdValidationResult
-  risk_score INTEGER,                     -- 위험 점수 (0-100)
+  ocr_result_id INTEGER NOT NULL,
+  hospital_id INTEGER,
+  procedure_name TEXT NOT NULL,
+  normalized_procedure TEXT,
+  procedure_id INTEGER,
+  price INTEGER NOT NULL,
+  original_price INTEGER,
+  discount_rate REAL,
+  shots INTEGER,
+  area TEXT,
+  price_type TEXT NOT NULL,
+  original_text TEXT,
+  extraction_confidence REAL,
+  price_per_unit INTEGER,
+  is_promotion INTEGER DEFAULT 0,
+  has_time_limit INTEGER DEFAULT 0,
+  conditions TEXT,
+  validation_status TEXT,
+  validation_result TEXT,
+  risk_score INTEGER,
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (ocr_result_id) REFERENCES ocr_results(id) ON DELETE CASCADE,
@@ -52,25 +52,25 @@ CREATE TABLE IF NOT EXISTS extracted_prices (
 -- 3. 가격 광고 위반 기록 테이블
 CREATE TABLE IF NOT EXISTS price_ad_violations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  extracted_price_id INTEGER NOT NULL,    -- extracted_prices.id 참조
-  rule_code TEXT NOT NULL,                -- PAR-001 ~ PAR-006
-  rule_name TEXT NOT NULL,                -- 규정명
-  description TEXT NOT NULL,              -- 위반 설명
-  severity TEXT NOT NULL,                 -- critical, major, minor
+  extracted_price_id INTEGER NOT NULL,
+  rule_code TEXT NOT NULL,
+  rule_name TEXT NOT NULL,
+  description TEXT NOT NULL,
+  severity TEXT NOT NULL,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (extracted_price_id) REFERENCES extracted_prices(id) ON DELETE CASCADE
 );
 
--- 4. 이미지 위반 기록 테이블 (OCR 이미지 자체 위반)
+-- 4. 이미지 위반 기록 테이블
 CREATE TABLE IF NOT EXISTS image_violations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  ocr_result_id INTEGER NOT NULL,         -- ocr_results.id 참조
-  violation_type TEXT NOT NULL,           -- BEFORE_AFTER, GUARANTEE, EXAGGERATION, PRICE_INDUCEMENT, TESTIMONIAL, OTHER
-  related_text TEXT,                      -- 관련 텍스트
-  severity TEXT NOT NULL,                 -- critical, major, minor
-  description TEXT NOT NULL,              -- 위반 설명
-  legal_basis TEXT,                       -- 법적 근거
-  confidence REAL,                        -- 탐지 신뢰도
+  ocr_result_id INTEGER NOT NULL,
+  violation_type TEXT NOT NULL,
+  related_text TEXT,
+  severity TEXT NOT NULL,
+  description TEXT NOT NULL,
+  legal_basis TEXT,
+  confidence REAL,
   created_at TEXT DEFAULT (datetime('now')),
   FOREIGN KEY (ocr_result_id) REFERENCES ocr_results(id) ON DELETE CASCADE
 );
@@ -132,4 +132,4 @@ SELECT
 FROM extracted_prices ep
 WHERE ep.normalized_procedure IS NOT NULL
 GROUP BY ep.normalized_procedure
-HAVING sample_count >= 3;
+HAVING COUNT(*) >= 3;

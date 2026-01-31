@@ -15,3 +15,5 @@ ENVIRONMENT = "development"
 ENGINE_VERSION = "1.1.0"
 PATTERN_VERSION = "1.0.0"
 LOG_LEVEL = "info"
+# GEMINI_API_KEY는 Cloudflare Dashboard에서 Secret으로 설정
+# wrangler secret put GEMINI_API_KEY

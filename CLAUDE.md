@@ -194,6 +194,45 @@ cd medcheck-scv && npm run crawl:seoul
 
 ---
 
+## D1 SQL Migration Rules
+
+Cloudflare D1 has limited SQLite feature support. Follow these rules strictly:
+
+### Prohibited (DO NOT USE)
+| Feature | Reason |
+|---------|--------|
+| `CREATE TRIGGER` | D1 does not support triggers |
+| `CREATE VIEW` | D1 does not support views |
+| `FOREIGN KEY` | D1 ignores foreign key constraints |
+| Multi-row `INSERT VALUES` | Use separate INSERT statements |
+| `CHECK (..., NULL)` | Use `IS NULL OR IN (...)` instead |
+
+### Allowed
+| Feature | Example |
+|---------|---------|
+| `CREATE TABLE IF NOT EXISTS` | Standard table creation |
+| `CREATE INDEX IF NOT EXISTS` | Index creation |
+| `INSERT OR IGNORE` | Safe insert with conflict handling |
+| `DROP TABLE IF EXISTS` | Safe table removal |
+
+### Example Migration
+```sql
+-- Good: Separate INSERT statements
+INSERT OR IGNORE INTO settings (key, value) VALUES ('key1', 'val1');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('key2', 'val2');
+
+-- Bad: Multi-row INSERT
+INSERT INTO settings (key, value) VALUES ('key1', 'val1'), ('key2', 'val2');
+
+-- Good: NULL check
+CHECK (col IS NULL OR col IN ('a', 'b', 'c'))
+
+-- Bad: NULL in IN clause
+CHECK (col IN ('a', 'b', 'c', NULL))
+```
+
+---
+
 ## API Reference (50+ endpoints)
 
 ### Analysis API

@@ -231,3 +231,261 @@ export interface ViolationPattern {
   /** 활성화 여부 */
   enabled: boolean;
 }
+
+// ============================================
+// 피드백 시스템 타입 (자동 개선)
+// ============================================
+
+/**
+ * 피드백 타입 (확장)
+ */
+export type FeedbackTypeExtended =
+  | 'true_positive'     // 정탐 (맞음)
+  | 'false_positive'    // 오탐 (잘못 탐지)
+  | 'false_negative'    // 미탐 (놓침)
+  | 'severity_adjust';  // 심각도 조정
+
+/**
+ * 피드백 검토 상태
+ */
+export type FeedbackReviewStatus =
+  | 'pending'    // 검토 대기
+  | 'reviewed'   // 검토 완료
+  | 'applied'    // 적용됨
+  | 'rejected';  // 거부됨
+
+/**
+ * 맥락 유형
+ */
+export type ContextType =
+  | 'negation'     // 부정문 (아니다, 없다)
+  | 'question'     // 의문문
+  | 'quotation'    // 인용문
+  | 'disclaimer'   // 면책조항
+  | 'comparison'   // 비교 문맥
+  | 'normal';      // 일반
+
+/**
+ * 위반 탐지 피드백 요청
+ */
+export interface ViolationFeedbackRequest {
+  /** 분석 ID */
+  analysisId: string;
+  /** 특정 위반 항목 ID */
+  violationId?: string;
+  /** 피드백 타입 */
+  feedbackType: FeedbackTypeExtended;
+  /** 패턴 ID (오탐/정탐 시) */
+  patternId?: string;
+  /** 원래 심각도 */
+  originalSeverity?: ViolationSeverity;
+  /** 수정된 심각도 (severity_adjust 시) */
+  correctedSeverity?: ViolationSeverity;
+  /** 주변 맥락 텍스트 */
+  contextText?: string;
+  /** 맥락 유형 */
+  contextType?: ContextType;
+  /** 병원 진료과목 */
+  hospitalDepartment?: string;
+  /** 미탐지된 텍스트 (false_negative 시) */
+  missedText?: string;
+  /** 새 패턴 제안 */
+  suggestedPattern?: string;
+  /** 사용자 메모 */
+  userNote?: string;
+  /** 제출자 */
+  submittedBy?: string;
+}
+
+/**
+ * 가격 추출 피드백 타입
+ */
+export type PriceFeedbackType =
+  | 'correct'          // 정확함
+  | 'wrong_price'      // 가격 오류
+  | 'wrong_procedure'  // 시술명 오류
+  | 'wrong_mapping'    // 매핑 오류
+  | 'wrong_unit'       // 단위 오류
+  | 'missing_info';    // 정보 누락
+
+/**
+ * 가격 추출 피드백 요청
+ */
+export interface PriceFeedbackRequest {
+  /** 추출된 가격 ID */
+  extractedPriceId: number;
+  /** OCR 결과 ID */
+  ocrResultId?: number;
+  /** 피드백 타입 */
+  feedbackType: PriceFeedbackType;
+  /** 원래 가격 */
+  originalPrice?: number;
+  /** 수정된 가격 */
+  correctedPrice?: number;
+  /** 원래 시술명 */
+  originalProcedure?: string;
+  /** 수정된 시술명 */
+  correctedProcedure?: string;
+  /** 올바른 시술 ID */
+  correctedProcedureId?: string;
+  /** 필드별 수정 내용 (JSON) */
+  fieldCorrections?: Record<string, { original: unknown; corrected: unknown }>;
+  /** 사용자 메모 */
+  userNote?: string;
+  /** 제출자 */
+  submittedBy?: string;
+}
+
+/**
+ * 패턴 성능 데이터
+ */
+export interface PatternPerformance {
+  patternId: string;
+  periodType: 'daily' | 'weekly' | 'monthly' | 'all_time';
+  periodStart: string;
+  periodEnd: string;
+  totalMatches: number;
+  truePositives: number;
+  falsePositives: number;
+  falseNegatives: number;
+  accuracy: number;
+  precision: number;
+  recall: number;
+  f1Score: number;
+  isFlagged: boolean;
+  flagReason?: string;
+}
+
+/**
+ * 맥락별 성능 데이터
+ */
+export interface ContextPerformance {
+  patternId: string;
+  contextType: ContextType;
+  totalMatches: number;
+  truePositives: number;
+  falsePositives: number;
+  accuracy: number;
+  confidenceModifier: number;
+  sampleTexts?: string[];
+}
+
+/**
+ * 진료과목별 성능 데이터
+ */
+export interface DepartmentPerformance {
+  patternId: string;
+  departmentCode: string;
+  departmentName: string;
+  totalMatches: number;
+  truePositives: number;
+  falsePositives: number;
+  accuracy: number;
+  confidenceModifier: number;
+}
+
+/**
+ * 자동 학습 타입
+ */
+export type LearningType =
+  | 'exception_generated'       // 예외 규칙 생성
+  | 'confidence_adjusted'       // 신뢰도 조정
+  | 'pattern_suggested'         // 패턴 제안
+  | 'mapping_learned'           // 매핑 학습
+  | 'severity_adjusted'         // 심각도 조정
+  | 'context_modifier_updated'; // 맥락 배수 업데이트
+
+/**
+ * 학습 대상 타입
+ */
+export type LearningTargetType =
+  | 'pattern'
+  | 'mapping'
+  | 'exception'
+  | 'procedure';
+
+/**
+ * 학습 상태
+ */
+export type LearningStatus =
+  | 'pending'      // 대기
+  | 'approved'     // 승인됨
+  | 'rejected'     // 거부됨
+  | 'auto_applied' // 자동 적용됨
+  | 'expired';     // 만료됨
+
+/**
+ * 자동 학습 로그
+ */
+export interface AutoLearningLog {
+  id: string;
+  learningType: LearningType;
+  targetType: LearningTargetType;
+  targetId: string;
+  inputData: unknown;
+  outputData: unknown;
+  confidenceScore: number;
+  sourceFeedbackCount: number;
+  sourceFeedbackIds: string[];
+  status: LearningStatus;
+  autoApplyEligible: boolean;
+  autoApplyReason?: string;
+  appliedAt?: string;
+  appliedBy?: string;
+  rejectedReason?: string;
+  createdAt: string;
+}
+
+/**
+ * 예외 규칙 후보
+ */
+export interface ExceptionCandidate {
+  id: string;
+  patternId: string;
+  exceptionType: 'keyword' | 'context' | 'regex' | 'department' | 'composite';
+  exceptionPattern: string;
+  exceptionDescription?: string;
+  sourceType: 'auto' | 'manual' | 'suggested';
+  sourceFeedbackIds: string[];
+  sampleTexts: string[];
+  occurrenceCount: number;
+  uniqueSources: number;
+  confidence: number;
+  meetsThreshold: boolean;
+  status: 'collecting' | 'pending_review' | 'approved' | 'rejected' | 'merged';
+  approvedBy?: string;
+  approvedAt?: string;
+  createdAt: string;
+}
+
+/**
+ * 성능 리포트
+ */
+export interface PerformanceReport {
+  generatedAt: string;
+  periodDays: number;
+  summary: {
+    totalPatterns: number;
+    totalFeedbacks: number;
+    avgAccuracy: number;
+    flaggedPatterns: number;
+    pendingLearning: number;
+  };
+  topPerformers: PatternPerformance[];
+  lowPerformers: PatternPerformance[];
+  contextStats: Array<{
+    contextType: ContextType;
+    avgAccuracy: number;
+    patternCount: number;
+  }>;
+  departmentStats: Array<{
+    department: string;
+    avgAccuracy: number;
+    patternCount: number;
+  }>;
+  learningStats: {
+    pendingExceptions: number;
+    approvedThisWeek: number;
+    autoAppliedThisWeek: number;
+  };
+}

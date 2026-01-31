@@ -22,6 +22,8 @@ import {
   allExceptionsRoutes,
 } from './api/routes';
 import { violationDetector } from './modules/violation-detector';
+import { createPerformanceTracker } from './services/performance-tracker';
+import { createAutoLearner } from './services/auto-learner';
 import type { D1Database } from './db/d1';
 
 // ============================================
@@ -897,6 +899,275 @@ app.route('/v1/exception-suggestions', exceptionSuggestionsRoutes);
 // 패턴별 라우트 (중첩)
 app.route('/v1/patterns/:patternId/exceptions', patternExceptionsRoutes);
 app.route('/v1/patterns/:patternId/versions', patternVersionsRoutes);
+
+// ============================================
+// 📊 성능 추적 API (자동 개선 시스템)
+// ============================================
+
+// 패턴 성능 목록
+app.get('/v1/performance/patterns', async (c) => {
+  try {
+    const flaggedOnly = c.req.query('flaggedOnly') === 'true';
+    const limit = parseInt(c.req.query('limit') || '100');
+    const orderBy = (c.req.query('orderBy') || 'accuracy') as 'accuracy' | 'total_matches';
+    const orderDir = (c.req.query('orderDir') || 'asc') as 'asc' | 'desc';
+
+    const tracker = createPerformanceTracker(c.env.DB);
+    const patterns = await tracker.getAllPatternPerformance({
+      flaggedOnly,
+      limit,
+      orderBy,
+      orderDir,
+    });
+
+    return c.json({ success: true, data: patterns });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 특정 패턴 성능
+app.get('/v1/performance/patterns/:patternId', async (c) => {
+  try {
+    const patternId = c.req.param('patternId');
+    const tracker = createPerformanceTracker(c.env.DB);
+
+    const performance = await tracker.getPatternPerformance(patternId);
+    const contextPerformance = await tracker.analyzeContextPerformance(patternId);
+    const departmentPerformance = await tracker.analyzeDepartmentPerformance(patternId);
+
+    return c.json({
+      success: true,
+      data: {
+        performance,
+        contextPerformance,
+        departmentPerformance,
+      },
+    });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 성능 집계 실행 (배치)
+app.post('/v1/performance/aggregate', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const periodDays = body.periodDays || 30;
+
+    const tracker = createPerformanceTracker(c.env.DB);
+    const result = await tracker.aggregatePatternPerformance(periodDays);
+
+    return c.json({ success: true, data: result });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 성능 리포트 생성
+app.get('/v1/performance/report', async (c) => {
+  try {
+    const periodDays = parseInt(c.req.query('periodDays') || '30');
+
+    const tracker = createPerformanceTracker(c.env.DB);
+    const report = await tracker.generatePerformanceReport(periodDays);
+
+    return c.json({ success: true, data: report });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 저성능 패턴 목록
+app.get('/v1/performance/flagged', async (c) => {
+  try {
+    const threshold = parseFloat(c.req.query('threshold') || '0.8');
+
+    const tracker = createPerformanceTracker(c.env.DB);
+    const flagged = await tracker.flagLowPerformancePatterns(threshold);
+
+    return c.json({ success: true, data: flagged });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// ============================================
+// 🧠 자동 학습 API (자동 개선 시스템)
+// ============================================
+
+// 학습 후보 목록
+app.get('/v1/learning/candidates', async (c) => {
+  try {
+    const learningType = c.req.query('type') as any;
+    const limit = parseInt(c.req.query('limit') || '50');
+
+    const learner = createAutoLearner(c.env.DB);
+    const candidates = await learner.getPendingLearning({
+      learningType,
+      limit,
+    });
+
+    return c.json({ success: true, data: candidates });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 자동 적용 가능 목록
+app.get('/v1/learning/auto-apply-eligible', async (c) => {
+  try {
+    const learner = createAutoLearner(c.env.DB);
+    const eligible = await learner.getAutoApplyEligible();
+
+    return c.json({ success: true, data: eligible });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 학습 후보 승인
+app.post('/v1/learning/candidates/:id/approve', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+
+    const learner = createAutoLearner(c.env.DB);
+    await learner.approveLearning(id, body.approvedBy);
+
+    return c.json({ success: true, data: { id, status: 'approved' } });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 학습 후보 거부
+app.post('/v1/learning/candidates/:id/reject', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+
+    if (!body.reason) {
+      return c.json({ success: false, error: 'reason is required' }, 400);
+    }
+
+    const learner = createAutoLearner(c.env.DB);
+    await learner.rejectLearning(id, body.reason);
+
+    return c.json({ success: true, data: { id, status: 'rejected' } });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 예외 후보 생성 트리거
+app.post('/v1/learning/generate-exceptions', async (c) => {
+  try {
+    const body = await c.req.json().catch(() => ({}));
+    const patternId = body.patternId;
+
+    const learner = createAutoLearner(c.env.DB);
+    const result = await learner.generateExceptionCandidates(patternId);
+
+    return c.json({ success: true, data: result });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 패턴 후보 추출 트리거
+app.post('/v1/learning/extract-patterns', async (c) => {
+  try {
+    const learner = createAutoLearner(c.env.DB);
+    const candidates = await learner.extractPatternCandidates();
+
+    return c.json({ success: true, data: candidates });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 매핑 학습 트리거
+app.post('/v1/learning/learn-mappings', async (c) => {
+  try {
+    const learner = createAutoLearner(c.env.DB);
+    const rules = await learner.learnMappingPatterns();
+
+    return c.json({ success: true, data: rules });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 예외 후보 목록
+app.get('/v1/exception-candidates', async (c) => {
+  try {
+    const patternId = c.req.query('patternId');
+    const status = c.req.query('status') || 'pending_review';
+    const limit = parseInt(c.req.query('limit') || '50');
+
+    let query = 'SELECT * FROM exception_candidates WHERE 1=1';
+    const params: any[] = [];
+
+    if (patternId) {
+      query += ' AND pattern_id = ?';
+      params.push(patternId);
+    }
+    if (status !== 'all') {
+      query += ' AND status = ?';
+      params.push(status);
+    }
+
+    query += ' ORDER BY confidence DESC, occurrence_count DESC LIMIT ?';
+    params.push(limit);
+
+    const results = await c.env.DB.prepare(query).bind(...params).all();
+    return c.json({ success: true, data: results.results });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 예외 후보 승인
+app.post('/v1/exception-candidates/:id/approve', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json().catch(() => ({}));
+
+    await c.env.DB.prepare(`
+      UPDATE exception_candidates SET
+        status = 'approved',
+        approved_by = ?,
+        approved_at = datetime('now'),
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).bind(body.approvedBy || 'system', id).run();
+
+    return c.json({ success: true, data: { id, status: 'approved' } });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
+
+// 예외 후보 거부
+app.post('/v1/exception-candidates/:id/reject', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const body = await c.req.json();
+
+    await c.env.DB.prepare(`
+      UPDATE exception_candidates SET
+        status = 'rejected',
+        rejection_reason = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).bind(body.reason || '', id).run();
+
+    return c.json({ success: true, data: { id, status: 'rejected' } });
+  } catch (e: any) {
+    return c.json({ success: false, error: e.message }, 500);
+  }
+});
 
 // ============================================
 // 🔔 가격 변동 알림 API

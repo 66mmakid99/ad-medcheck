@@ -4,7 +4,7 @@
 
 **AD-MEDCHECK (MADMEDCHECK)** is a Medical Advertisement Compliance Analysis System for Korean medical advertisements. It automatically detects and analyzes potential violations of Korean medical advertising laws (의료법) and related regulations.
 
-**Current Version:** Engine v1.3.0 / Dashboard v1.3.0
+**Current Version:** Engine v1.4.0 / Dashboard v1.4.0
 **Language:** Korean (한국어) with English documentation
 **License:** ISC
 **Last Updated:** 2026-01-31
@@ -60,8 +60,11 @@ ad-medcheck/
 │   │   │       ├── index.ts
 │   │   │       ├── context-analyzer.ts
 │   │   │       └── llm-client.ts
+│   │   ├── services/               # 자동 개선 시스템 (v1.4.0)
+│   │   │   ├── performance-tracker.ts  # 패턴 성능 추적
+│   │   │   └── auto-learner.ts         # 자동 학습 모듈
 │   │   ├── adapters/
-│   │   │   ├── ocr-adapter.ts     # OCR interface (NOT IMPLEMENTED)
+│   │   │   ├── ocr-adapter.ts     # OCR 이미지 분석
 │   │   │   └── scv-adapter.ts
 │   │   └── db/
 │   │       ├── d1.ts
@@ -73,7 +76,9 @@ ad-medcheck/
 │   │   ├── 003_pricing_module.sql
 │   │   ├── 004_pricing_v2_upgrade.sql
 │   │   ├── 005_crawl_status.sql
-│   │   └── 006_collected_hospitals_and_sessions.sql
+│   │   ├── 006_collected_hospitals_and_sessions.sql
+│   │   ├── 007_extracted_prices.sql
+│   │   └── 008_feedback_system.sql    # 자동 개선 시스템 (v1.4.0)
 │   ├── dashboard/                 # Dashboard JSX (dev reference)
 │   ├── package.json
 │   ├── tsconfig.json
@@ -126,7 +131,7 @@ ad-medcheck/
 
 ---
 
-## Dashboard Features (10 Tabs)
+## Dashboard Features (14 Tabs)
 
 | Tab | Name | Description |
 |-----|------|-------------|
@@ -140,6 +145,10 @@ ad-medcheck/
 | 🔄 | Mapping Approval | Approve/reject unmapped procedure names |
 | ⚠️ | Exceptions/FP | False positive stats, exception suggestions |
 | 🎭 | Tricks | Evasion pattern management |
+| 📥 | Feedback | User feedback collection, approve/reject (v1.4.0) |
+| 📈 | Performance | Pattern accuracy tracking, flagged patterns (v1.4.0) |
+| 🔧 | Improvements | Learning candidates, exception candidates (v1.4.0) |
+| 📜 | History | Improvement history timeline (v1.4.0) |
 
 ---
 
@@ -185,6 +194,45 @@ cd medcheck-dashboard && npm run build
 
 # Crawler - Seoul hospitals
 cd medcheck-scv && npm run crawl:seoul
+```
+
+---
+
+## D1 SQL Migration Rules
+
+Cloudflare D1 has limited SQLite feature support. Follow these rules strictly:
+
+### Prohibited (DO NOT USE)
+| Feature | Reason |
+|---------|--------|
+| `CREATE TRIGGER` | D1 does not support triggers |
+| `CREATE VIEW` | D1 does not support views |
+| `FOREIGN KEY` | D1 ignores foreign key constraints |
+| Multi-row `INSERT VALUES` | Use separate INSERT statements |
+| `CHECK (..., NULL)` | Use `IS NULL OR IN (...)` instead |
+
+### Allowed
+| Feature | Example |
+|---------|---------|
+| `CREATE TABLE IF NOT EXISTS` | Standard table creation |
+| `CREATE INDEX IF NOT EXISTS` | Index creation |
+| `INSERT OR IGNORE` | Safe insert with conflict handling |
+| `DROP TABLE IF EXISTS` | Safe table removal |
+
+### Example Migration
+```sql
+-- Good: Separate INSERT statements
+INSERT OR IGNORE INTO settings (key, value) VALUES ('key1', 'val1');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('key2', 'val2');
+
+-- Bad: Multi-row INSERT
+INSERT INTO settings (key, value) VALUES ('key1', 'val1'), ('key2', 'val2');
+
+-- Good: NULL check
+CHECK (col IS NULL OR col IN ('a', 'b', 'c'))
+
+-- Bad: NULL in IN clause
+CHECK (col IN ('a', 'b', 'c', NULL))
 ```
 
 ---
@@ -266,6 +314,84 @@ cd medcheck-scv && npm run crawl:seoul
 | GET | `/v1/mapping-candidates/:id` | Candidate detail |
 | POST | `/v1/mapping-candidates/:id/approve` | Approve mapping |
 | POST | `/v1/mapping-candidates/:id/reject` | Reject mapping |
+
+### Feedback API (v1.4.0 확장)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/v1/feedback` | 기본 피드백 (기존) |
+| POST | `/v1/feedback/violation` | 위반 탐지 피드백 (확장) |
+| POST | `/v1/feedback/price` | 가격 추출 피드백 |
+| GET | `/v1/feedback/stats` | 피드백 통계 |
+| GET | `/v1/feedback/stats/pattern/:id` | 패턴별 통계 |
+| GET | `/v1/feedback/pending` | 검토 대기 피드백 |
+| POST | `/v1/feedback/:id/review` | 피드백 검토 처리 |
+
+### Performance Tracking API (v1.4.0 신규)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/performance/patterns` | 패턴 성능 목록 |
+| GET | `/v1/performance/patterns/:id` | 패턴별 상세 성능 |
+| POST | `/v1/performance/aggregate` | 성능 집계 실행 |
+| GET | `/v1/performance/report` | 성능 리포트 |
+| GET | `/v1/performance/flagged` | 저성능 패턴 목록 |
+
+### Auto Learning API (v1.4.0 신규)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/learning/candidates` | 학습 후보 목록 |
+| GET | `/v1/learning/auto-apply-eligible` | 자동 적용 가능 목록 |
+| POST | `/v1/learning/candidates/:id/approve` | 학습 후보 승인 |
+| POST | `/v1/learning/candidates/:id/reject` | 학습 후보 거부 |
+| POST | `/v1/learning/generate-exceptions` | 예외 후보 생성 트리거 |
+| POST | `/v1/learning/extract-patterns` | 패턴 후보 추출 |
+| POST | `/v1/learning/learn-mappings` | 매핑 패턴 학습 |
+| GET | `/v1/exception-candidates` | 예외 후보 목록 |
+| POST | `/v1/exception-candidates/:id/approve` | 예외 후보 승인 |
+| POST | `/v1/exception-candidates/:id/reject` | 예외 후보 거부 |
+
+---
+
+## Auto-Improvement System (v1.4.0)
+
+### Architecture
+```
+[데이터 수집] → [분석 엔진] → [결과 반환] → [사용자 피드백]
+                                                    │
+                              ┌─────────────────────┴───────────────────┐
+                              ▼                                         ▼
+                    [성능 추적 서비스]                           [자동 학습 모듈]
+                    - 패턴별 정확도                              - 예외 규칙 생성
+                    - 맥락별 성능                                - 신뢰도 조정
+                    - 저성능 플래그                              - 매핑 패턴 학습
+                              │                                         │
+                              └─────────────┬───────────────────────────┘
+                                            ▼
+                                    [자동 개선 적용]
+```
+
+### Key Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| PerformanceTracker | `services/performance-tracker.ts` | 패턴 성능 집계/추적 |
+| AutoLearner | `services/auto-learner.ts` | 자동 학습/규칙 생성 |
+| FeedbackAPI | `api/routes/feedback.ts` | 피드백 수집 API |
+
+### Feedback Types
+| Type | Description | Auto-Learning |
+|------|-------------|---------------|
+| `true_positive` | 정탐 (맞음) | 신뢰도 강화 |
+| `false_positive` | 오탐 (잘못 탐지) | 예외 규칙 생성 |
+| `false_negative` | 미탐 (놓침) | 새 패턴 후보 |
+| `severity_adjust` | 심각도 조정 | 심각도 재학습 |
+
+### Auto-Apply Criteria
+| Learning Type | Auto-Apply | Review Required |
+|--------------|------------|-----------------|
+| 예외 규칙 | 신뢰도 95%+ & 10건+ | 80%+ |
+| 신뢰도 조정 | 변동폭 ±10% 이내 | 10%+ |
+| 매핑 학습 | 일치 패턴 5건+ | 3건+ |
+| 새 패턴 | - | 항상 |
 
 ---
 
@@ -355,6 +481,19 @@ cd medcheck-scv && npm run crawl:seoul
 | `ai_decisions` | AI decision records |
 | `competitor_settings` | Competitor monitoring |
 
+### 자동 개선 시스템 테이블 (v1.4.0)
+| Table | Purpose |
+|-------|---------|
+| `analysis_feedback_v2` | 확장된 분석 피드백 |
+| `pattern_performance` | 패턴별 성능 집계 |
+| `context_performance` | 맥락별 성능 |
+| `department_performance` | 진료과목별 성능 |
+| `price_extraction_feedback` | 가격 추출 피드백 |
+| `auto_learning_log` | 자동 학습 로그 |
+| `exception_candidates` | 예외 규칙 후보 |
+| `mapping_learning_data` | 매핑 학습 데이터 |
+| `feedback_settings` | 피드백/학습 설정 |
+
 ---
 
 ## Development Status
@@ -368,15 +507,21 @@ cd medcheck-scv && npm run crawl:seoul
 - Auto pipeline (Naver → Google → Analysis)
 - Dashboard deployment (Cloudflare Pages)
 - Real-time dashboard integration (5s polling)
+- OCR 이미지 분석 시스템 (Phase 1-6)
+- **자동 개선 시스템 Phase 1** (v1.4.0)
+  - 피드백 인프라 (확장 피드백 수집)
+  - 성능 추적 서비스 (패턴별/맥락별/진료과목별)
+  - 자동 학습 기초 모듈 (예외 후보 생성, 신뢰도 조정)
 
 ### In Progress
 - AI Hybrid analysis testing
 - Trick pattern collection
+- 자동 개선 시스템 Phase 2 (자동 적용 로직)
 
 ### Not Implemented
-- OCR (interface only)
 - AI accuracy verification
 - CSV output format improvement (user fixing)
+- 자동 개선 시스템 Phase 3 (A/B 테스트)
 
 ---
 
@@ -424,11 +569,11 @@ Example: P-56-01-001
 ## Recent Commits
 
 ```
+(pending) feat: 자동 개선 시스템 Phase 1 구현 (피드백 인프라)
+020abfd Merge pull request #12
+ff9db4b fix: SQL 마이그레이션 문법 수정
+d66aec2 feat: OCR 이미지 분석 시스템 완전 구현 (Phase 1-6)
 2447982 feat: 자동 파이프라인 완성 (네이버→구글→분석 연속 실행)
-83c1bf9 feat: 대시보드 실시간 연동 + 분석결과/크롤링현황 탭 추가
-5c4013f fix: output/ 경로 중복 버그 수정
-fd9097a fix: prevent output/ path duplication in pipeline
-4799d3a feat: extend pipeline with MedCheck Engine analysis (3-step)
 ```
 
 ---

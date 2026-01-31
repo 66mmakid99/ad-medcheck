@@ -114,6 +114,11 @@ export default function MedCheckDashboard() {
     { id: 'mapping', name: '🔄 매핑승인', badge: mappingCandidates.length },
     { id: 'fp', name: '⚠️ 예외/오탐', badge: fpStats.summary?.pending || 0 },
     { id: 'tricks', name: '🎭 꼼수', badge: tricksStats.summary?.total || 0 },
+    // 자동개선 시스템 탭
+    { id: 'feedback', name: '📥 피드백' },
+    { id: 'performance', name: '📈 성능' },
+    { id: 'improvements', name: '🔧 개선' },
+    { id: 'history', name: '📜 이력' },
   ];
 
   if (loading) {
@@ -636,6 +641,34 @@ export default function MedCheckDashboard() {
         {/* ============================================ */}
         {activeTab === 'tricks' && (
           <TricksTab apiBase={API_BASE} tricksStats={tricksStats} />
+        )}
+
+        {/* ============================================ */}
+        {/* 피드백 탭 */}
+        {/* ============================================ */}
+        {activeTab === 'feedback' && (
+          <FeedbackTab apiBase={API_BASE} />
+        )}
+
+        {/* ============================================ */}
+        {/* 성능 탭 */}
+        {/* ============================================ */}
+        {activeTab === 'performance' && (
+          <PerformanceTab apiBase={API_BASE} />
+        )}
+
+        {/* ============================================ */}
+        {/* 개선 탭 */}
+        {/* ============================================ */}
+        {activeTab === 'improvements' && (
+          <ImprovementsTab apiBase={API_BASE} />
+        )}
+
+        {/* ============================================ */}
+        {/* 이력 탭 */}
+        {/* ============================================ */}
+        {activeTab === 'history' && (
+          <HistoryTab apiBase={API_BASE} />
         )}
 
         {/* ============================================ */}
@@ -1622,6 +1655,731 @@ function TricksTab({ apiBase, tricksStats }) {
           <div className="p-8 text-center text-slate-500">등록된 꼼수 패턴이 없습니다</div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ============================================
+// 피드백 탭 컴포넌트
+// ============================================
+function FeedbackTab({ apiBase }) {
+  const [stats, setStats] = useState(null);
+  const [feedbackList, setFeedbackList] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState({ status: 'pending', feedback_type: '' });
+
+  useEffect(() => {
+    loadData();
+  }, [filter]);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filter.status) params.append('status', filter.status);
+      if (filter.feedback_type) params.append('feedback_type', filter.feedback_type);
+      params.append('limit', '50');
+
+      const [statsRes, listRes] = await Promise.all([
+        fetch(`${apiBase}/v1/feedback/stats`).then(r => r.json()),
+        fetch(`${apiBase}/v1/feedback/pending?${params}`).then(r => r.json()),
+      ]);
+
+      if (statsRes.success) setStats(statsRes.data);
+      if (listRes.success) setFeedbackList(listRes.data || []);
+    } catch (err) {
+      console.error('Failed to load feedback:', err);
+    }
+    setLoading(false);
+  };
+
+  const handleReview = async (id, action) => {
+    const reason = action === 'reject' ? prompt('반려 사유:') : null;
+    if (action === 'reject' && reason === null) return;
+
+    try {
+      const res = await fetch(`${apiBase}/v1/feedback/${id}/review`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, reason })
+      });
+      if ((await res.json()).success) loadData();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const FEEDBACK_TYPES = {
+    true_positive: { label: '정탐', color: 'bg-emerald-500/20 text-emerald-400', icon: '✅' },
+    false_positive: { label: '오탐', color: 'bg-red-500/20 text-red-400', icon: '🔴' },
+    false_negative: { label: '미탐', color: 'bg-yellow-500/20 text-yellow-400', icon: '🟡' },
+    severity_adjust: { label: '심각도', color: 'bg-blue-500/20 text-blue-400', icon: '🔵' },
+  };
+
+  const STATUS_LABELS = {
+    pending: { label: '대기', color: 'bg-orange-500/20 text-orange-400' },
+    reviewed: { label: '검토됨', color: 'bg-blue-500/20 text-blue-400' },
+    applied: { label: '적용됨', color: 'bg-emerald-500/20 text-emerald-400' },
+    rejected: { label: '반려', color: 'bg-slate-500/20 text-slate-400' },
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* 헤더 */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-semibold">📥 피드백 수집</h2>
+          <p className="text-sm text-slate-400">분석 결과에 대한 사용자 피드백을 관리합니다</p>
+        </div>
+        <button onClick={loadData} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">🔄 새로고침</button>
+      </div>
+
+      {/* 통계 */}
+      <div className="grid grid-cols-4 gap-3">
+        <StatCard title="오늘" value={stats?.today || 0} color="cyan" />
+        <StatCard title="이번 주" value={stats?.this_week || 0} color="blue" />
+        <StatCard title="대기 중" value={stats?.pending || 0} color="orange" />
+        <StatCard title="누적" value={stats?.total || 0} color="slate" />
+      </div>
+
+      {/* 유형별 분포 */}
+      {stats?.by_type && (
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+          <h3 className="font-semibold mb-3 text-sm">유형별 분포</h3>
+          <div className="grid grid-cols-4 gap-4">
+            {Object.entries(FEEDBACK_TYPES).map(([key, { label, icon }]) => (
+              <div key={key} className="text-center p-3 bg-slate-700/30 rounded-lg">
+                <div className="text-2xl mb-1">{icon}</div>
+                <div className="text-xl font-bold">{stats.by_type?.[key] || 0}</div>
+                <div className="text-xs text-slate-400">{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 필터 */}
+      <div className="flex gap-3">
+        <select
+          value={filter.status}
+          onChange={(e) => setFilter({ ...filter, status: e.target.value })}
+          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm"
+        >
+          <option value="">전체 상태</option>
+          <option value="pending">대기</option>
+          <option value="reviewed">검토됨</option>
+          <option value="applied">적용됨</option>
+          <option value="rejected">반려</option>
+        </select>
+        <select
+          value={filter.feedback_type}
+          onChange={(e) => setFilter({ ...filter, feedback_type: e.target.value })}
+          className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm"
+        >
+          <option value="">전체 유형</option>
+          <option value="true_positive">정탐</option>
+          <option value="false_positive">오탐</option>
+          <option value="false_negative">미탐</option>
+          <option value="severity_adjust">심각도</option>
+        </select>
+      </div>
+
+      {/* 피드백 목록 */}
+      <div className="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-700/50">
+            <tr>
+              <th className="text-left p-3">유형</th>
+              <th className="text-left p-3">패턴 ID</th>
+              <th className="text-left p-3">내용</th>
+              <th className="text-left p-3">상태</th>
+              <th className="text-left p-3">일시</th>
+              <th className="text-center p-3">액션</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-700">
+            {loading ? (
+              <tr><td colSpan={6} className="p-8 text-center text-slate-500">로딩 중...</td></tr>
+            ) : feedbackList.length === 0 ? (
+              <tr><td colSpan={6} className="p-8 text-center text-slate-500">피드백이 없습니다</td></tr>
+            ) : (
+              feedbackList.map((item) => {
+                const typeInfo = FEEDBACK_TYPES[item.feedback_type] || { label: item.feedback_type, color: 'bg-slate-500/20 text-slate-400', icon: '❓' };
+                const statusInfo = STATUS_LABELS[item.review_status] || { label: item.review_status, color: 'bg-slate-500/20 text-slate-400' };
+                return (
+                  <tr key={item.id} className="hover:bg-slate-700/30">
+                    <td className="p-3">
+                      <span className={`px-2 py-1 rounded text-xs ${typeInfo.color}`}>{typeInfo.icon} {typeInfo.label}</span>
+                    </td>
+                    <td className="p-3 font-mono text-xs text-slate-400">{item.pattern_id || '-'}</td>
+                    <td className="p-3 max-w-xs truncate text-slate-300">{item.context_text || item.user_note || '-'}</td>
+                    <td className="p-3">
+                      <span className={`px-2 py-1 rounded text-xs ${statusInfo.color}`}>{statusInfo.label}</span>
+                    </td>
+                    <td className="p-3 text-xs text-slate-400">{new Date(item.created_at).toLocaleString('ko-KR')}</td>
+                    <td className="p-3 text-center">
+                      {item.review_status === 'pending' && (
+                        <div className="flex gap-1 justify-center">
+                          <button onClick={() => handleReview(item.id, 'approve')} className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs hover:bg-emerald-500/30">승인</button>
+                          <button onClick={() => handleReview(item.id, 'reject')} className="px-2 py-1 bg-slate-500/20 text-slate-400 rounded text-xs hover:bg-slate-500/30">반려</button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ============================================
+// 성능 탭 컴포넌트
+// ============================================
+function PerformanceTab({ apiBase }) {
+  const [overview, setOverview] = useState(null);
+  const [patterns, setPatterns] = useState([]);
+  const [flagged, setFlagged] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeSubTab, setActiveSubTab] = useState('patterns');
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const [reportRes, patternsRes, flaggedRes] = await Promise.all([
+        fetch(`${apiBase}/v1/performance/report`).then(r => r.json()),
+        fetch(`${apiBase}/v1/performance/patterns?limit=50`).then(r => r.json()),
+        fetch(`${apiBase}/v1/performance/flagged`).then(r => r.json()),
+      ]);
+
+      if (reportRes.success) setOverview(reportRes.data);
+      if (patternsRes.success) setPatterns(patternsRes.data || []);
+      if (flaggedRes.success) setFlagged(flaggedRes.data || []);
+    } catch (err) {
+      console.error('Failed to load performance:', err);
+    }
+    setLoading(false);
+  };
+
+  const formatPercent = (v) => v === null ? 'N/A' : `${(v * 100).toFixed(1)}%`;
+  const getAccuracyColor = (v) => {
+    if (v === null) return 'text-slate-400';
+    if (v >= 0.9) return 'text-emerald-400';
+    if (v >= 0.8) return 'text-blue-400';
+    if (v >= 0.7) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+  const getAccuracyBg = (v) => {
+    if (v === null) return 'bg-slate-500';
+    if (v >= 0.9) return 'bg-emerald-500';
+    if (v >= 0.8) return 'bg-blue-500';
+    if (v >= 0.7) return 'bg-yellow-500';
+    return 'bg-red-500';
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="w-8 h-8 border-4 border-cyan-400 border-t-transparent rounded-full animate-spin"></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* 헤더 */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-semibold">📈 성능 추적</h2>
+          <p className="text-sm text-slate-400">패턴별 탐지 정확도를 모니터링합니다</p>
+        </div>
+        <button onClick={loadData} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">🔄 새로고침</button>
+      </div>
+
+      {/* 전체 성능 */}
+      <div className="grid grid-cols-4 gap-3">
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+          <p className="text-sm text-slate-400">전체 정확도</p>
+          <p className={`text-3xl font-bold ${getAccuracyColor(overview?.overall_accuracy)}`}>{formatPercent(overview?.overall_accuracy)}</p>
+          <p className="text-xs text-slate-500 mt-1">목표: 95%</p>
+        </div>
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+          <p className="text-sm text-slate-400">정밀도</p>
+          <p className={`text-3xl font-bold ${getAccuracyColor(overview?.overall_precision)}`}>{formatPercent(overview?.overall_precision)}</p>
+        </div>
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+          <p className="text-sm text-slate-400">재현율</p>
+          <p className={`text-3xl font-bold ${getAccuracyColor(overview?.overall_recall)}`}>{formatPercent(overview?.overall_recall)}</p>
+        </div>
+        <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+          <p className="text-sm text-slate-400">경고 패턴</p>
+          <p className={`text-3xl font-bold ${(overview?.flagged_count || 0) > 0 ? 'text-red-400' : 'text-emerald-400'}`}>{overview?.flagged_count || 0}</p>
+        </div>
+      </div>
+
+      {/* 목표 대비 진행률 */}
+      <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+        <h3 className="font-semibold mb-3 text-sm">목표 달성률</h3>
+        <div className="flex items-center gap-4">
+          <span className="text-sm text-slate-400 w-12">현재</span>
+          <div className="flex-1 bg-slate-700 rounded-full h-4 overflow-hidden">
+            <div className={`h-4 rounded-full transition-all ${getAccuracyBg(overview?.overall_accuracy)}`}
+              style={{ width: `${(overview?.overall_accuracy || 0) * 100}%` }} />
+          </div>
+          <span className="text-sm font-bold w-16">{formatPercent(overview?.overall_accuracy)}</span>
+          <span className="text-sm text-slate-500">/ 95%</span>
+        </div>
+      </div>
+
+      {/* 경고 패턴 알림 */}
+      {flagged.length > 0 && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+          <h3 className="font-semibold text-red-400 mb-2">⚠️ 검토 필요 패턴 ({flagged.length}개)</h3>
+          <p className="text-sm text-red-300 mb-3">정확도가 80% 미만인 패턴입니다. 예외 규칙 추가를 검토하세요.</p>
+          <div className="flex flex-wrap gap-2">
+            {flagged.slice(0, 5).map((p) => (
+              <span key={p.pattern_id} className="px-2 py-1 bg-red-500/20 text-red-400 rounded text-xs">{p.pattern_id}: {formatPercent(p.accuracy)}</span>
+            ))}
+            {flagged.length > 5 && <span className="text-sm text-red-400">외 {flagged.length - 5}개</span>}
+          </div>
+        </div>
+      )}
+
+      {/* 서브탭 */}
+      <div className="flex gap-2">
+        <button onClick={() => setActiveSubTab('patterns')} className={`px-4 py-2 rounded-lg text-sm ${activeSubTab === 'patterns' ? 'bg-cyan-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>패턴별 성능</button>
+        <button onClick={() => setActiveSubTab('flagged')} className={`px-4 py-2 rounded-lg text-sm ${activeSubTab === 'flagged' ? 'bg-cyan-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>경고 패턴</button>
+      </div>
+
+      {/* 패턴별 성능 테이블 */}
+      {activeSubTab === 'patterns' && (
+        <div className="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-700/50">
+              <tr>
+                <th className="text-left p-3">패턴 ID</th>
+                <th className="text-right p-3">정확도</th>
+                <th className="text-right p-3">총 매칭</th>
+                <th className="text-right p-3">정탐</th>
+                <th className="text-right p-3">오탐</th>
+                <th className="text-center p-3">상태</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700">
+              {patterns.length === 0 ? (
+                <tr><td colSpan={6} className="p-8 text-center text-slate-500">데이터가 없습니다</td></tr>
+              ) : (
+                patterns.map((p) => (
+                  <tr key={p.id || p.pattern_id} className="hover:bg-slate-700/30">
+                    <td className="p-3 font-mono text-xs">{p.pattern_id}</td>
+                    <td className={`p-3 text-right font-bold ${getAccuracyColor(p.accuracy)}`}>{formatPercent(p.accuracy)}</td>
+                    <td className="p-3 text-right">{p.total_matches}</td>
+                    <td className="p-3 text-right text-emerald-400">{p.true_positives}</td>
+                    <td className="p-3 text-right text-red-400">{p.false_positives}</td>
+                    <td className="p-3 text-center">
+                      {p.is_flagged ? (
+                        <span className="px-2 py-1 bg-red-500/20 text-red-400 rounded text-xs">⚠️ 경고</span>
+                      ) : (
+                        <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs">✅ 정상</span>
+                      )}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* 경고 패턴 상세 */}
+      {activeSubTab === 'flagged' && (
+        <div className="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-700/50">
+              <tr>
+                <th className="text-left p-3">패턴 ID</th>
+                <th className="text-right p-3">정확도</th>
+                <th className="text-right p-3">오탐 수</th>
+                <th className="text-left p-3">경고 사유</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700">
+              {flagged.length === 0 ? (
+                <tr><td colSpan={4} className="p-8 text-center text-slate-500">🎉 경고 패턴이 없습니다!</td></tr>
+              ) : (
+                flagged.map((p) => (
+                  <tr key={p.pattern_id} className="hover:bg-slate-700/30">
+                    <td className="p-3 font-mono text-xs">{p.pattern_id}</td>
+                    <td className={`p-3 text-right font-bold ${getAccuracyColor(p.accuracy)}`}>{formatPercent(p.accuracy)}</td>
+                    <td className="p-3 text-right text-red-400">{p.false_positives}</td>
+                    <td className="p-3 text-slate-400">{p.flag_reason || '정확도 80% 미만'}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// 개선 탭 컴포넌트
+// ============================================
+function ImprovementsTab({ apiBase }) {
+  const [candidates, setCandidates] = useState([]);
+  const [exceptions, setExceptions] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [activeSubTab, setActiveSubTab] = useState('learning');
+  const [filter, setFilter] = useState({ status: 'pending', learning_type: '' });
+
+  useEffect(() => {
+    loadData();
+  }, [filter]);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filter.status) params.append('status', filter.status);
+      if (filter.learning_type) params.append('learning_type', filter.learning_type);
+      params.append('limit', '50');
+
+      const [candidatesRes, exceptionsRes] = await Promise.all([
+        fetch(`${apiBase}/v1/learning/candidates?${params}`).then(r => r.json()),
+        fetch(`${apiBase}/v1/exception-candidates?status=pending_review`).then(r => r.json()),
+      ]);
+
+      if (candidatesRes.success) setCandidates(candidatesRes.data || []);
+      if (exceptionsRes.success) setExceptions(exceptionsRes.data || []);
+    } catch (err) {
+      console.error('Failed to load improvements:', err);
+    }
+    setLoading(false);
+  };
+
+  const handleAction = async (id, action, isException = false) => {
+    const reason = action === 'reject' ? prompt('반려 사유:') : null;
+    if (action === 'reject' && reason === null) return;
+
+    const endpoint = isException
+      ? `${apiBase}/v1/exception-candidates/${id}/${action}`
+      : `${apiBase}/v1/learning/candidates/${id}/${action}`;
+
+    try {
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason })
+      });
+      if ((await res.json()).success) {
+        loadData();
+        if (action === 'approve') alert('✅ 승인 완료!');
+      }
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const LEARNING_TYPES = {
+    exception_generated: { label: '예외 규칙', icon: '🔵' },
+    confidence_adjusted: { label: '신뢰도 조정', icon: '🟢' },
+    pattern_suggested: { label: '새 패턴', icon: '🟡' },
+    mapping_learned: { label: '매핑 규칙', icon: '🟣' },
+    severity_adjusted: { label: '심각도 조정', icon: '🔴' },
+    context_modifier_updated: { label: '맥락 보정', icon: '⚪' },
+  };
+
+  const STATUS_LABELS = {
+    pending: { label: '대기', color: 'bg-orange-500/20 text-orange-400' },
+    approved: { label: '승인됨', color: 'bg-blue-500/20 text-blue-400' },
+    auto_applied: { label: '자동 적용', color: 'bg-emerald-500/20 text-emerald-400' },
+    rejected: { label: '반려', color: 'bg-slate-500/20 text-slate-400' },
+    expired: { label: '만료', color: 'bg-slate-500/20 text-slate-500' },
+  };
+
+  const getConfidenceColor = (c) => {
+    if (c >= 0.95) return 'text-emerald-400';
+    if (c >= 0.85) return 'text-blue-400';
+    if (c >= 0.7) return 'text-yellow-400';
+    return 'text-red-400';
+  };
+
+  return (
+    <div className="space-y-4">
+      {/* 헤더 */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-semibold">🔧 개선 관리</h2>
+          <p className="text-sm text-slate-400">자동 학습된 개선 후보를 검토하고 적용합니다</p>
+        </div>
+        <button onClick={loadData} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">🔄 새로고침</button>
+      </div>
+
+      {/* 요약 */}
+      <div className="grid grid-cols-3 gap-3">
+        <StatCard title="대기 중" value={candidates.filter(c => c.status === 'pending').length} color="orange" />
+        <StatCard title="자동 적용 가능" value={candidates.filter(c => c.auto_apply_eligible).length} color="emerald" />
+        <StatCard title="예외 후보" value={exceptions.length} color="blue" />
+      </div>
+
+      {/* 서브탭 */}
+      <div className="flex gap-2">
+        <button onClick={() => setActiveSubTab('learning')} className={`px-4 py-2 rounded-lg text-sm ${activeSubTab === 'learning' ? 'bg-cyan-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>학습 후보</button>
+        <button onClick={() => setActiveSubTab('exceptions')} className={`px-4 py-2 rounded-lg text-sm ${activeSubTab === 'exceptions' ? 'bg-cyan-500 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600'}`}>예외 규칙 후보</button>
+      </div>
+
+      {/* 필터 */}
+      {activeSubTab === 'learning' && (
+        <div className="flex gap-3">
+          <select value={filter.status} onChange={(e) => setFilter({ ...filter, status: e.target.value })} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+            <option value="">전체 상태</option>
+            <option value="pending">대기</option>
+            <option value="approved">승인됨</option>
+            <option value="auto_applied">자동 적용</option>
+            <option value="rejected">반려</option>
+          </select>
+          <select value={filter.learning_type} onChange={(e) => setFilter({ ...filter, learning_type: e.target.value })} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+            <option value="">전체 유형</option>
+            {Object.entries(LEARNING_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+          </select>
+        </div>
+      )}
+
+      {/* 학습 후보 목록 */}
+      {activeSubTab === 'learning' && (
+        <div className="space-y-3">
+          {loading ? (
+            <div className="text-center py-12 text-slate-500">로딩 중...</div>
+          ) : candidates.length === 0 ? (
+            <div className="text-center py-12 text-slate-500">개선 후보가 없습니다</div>
+          ) : (
+            candidates.map((c) => {
+              const typeInfo = LEARNING_TYPES[c.learning_type] || { label: c.learning_type, icon: '❓' };
+              const statusInfo = STATUS_LABELS[c.status] || { label: c.status, color: 'bg-slate-500/20 text-slate-400' };
+              return (
+                <div key={c.id} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xl">{typeInfo.icon}</span>
+                      <span className="font-semibold">{typeInfo.label}</span>
+                      <span className={`px-2 py-1 rounded text-xs ${statusInfo.color}`}>{statusInfo.label}</span>
+                      {c.auto_apply_eligible && <span className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs">🤖 자동 적용 가능</span>}
+                    </div>
+                    <div className="text-right">
+                      <div className={`text-lg font-bold ${getConfidenceColor(c.confidence_score)}`}>{(c.confidence_score * 100).toFixed(0)}%</div>
+                      <div className="text-xs text-slate-400">신뢰도</div>
+                    </div>
+                  </div>
+                  <div className="text-sm text-slate-400 mb-2">대상: <span className="font-mono text-white">{c.target_id}</span> ({c.target_type})</div>
+                  {c.output_data && (
+                    <div className="bg-slate-700/50 p-3 rounded mb-3">
+                      <pre className="text-xs text-slate-300 whitespace-pre-wrap overflow-auto max-h-24">
+                        {typeof c.output_data === 'string' ? c.output_data : JSON.stringify(c.output_data, null, 2)}
+                      </pre>
+                    </div>
+                  )}
+                  <div className="text-xs text-slate-500 mb-3">피드백 {c.source_feedback_count || 0}건 기반 · {new Date(c.created_at).toLocaleString('ko-KR')}</div>
+                  {c.status === 'pending' && (
+                    <div className="flex gap-2">
+                      <button onClick={() => handleAction(c.id, 'approve')} className="px-4 py-2 bg-emerald-500/20 text-emerald-400 rounded text-sm hover:bg-emerald-500/30">승인</button>
+                      <button onClick={() => handleAction(c.id, 'reject')} className="px-4 py-2 bg-slate-500/20 text-slate-400 rounded text-sm hover:bg-slate-500/30">반려</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+          )}
+        </div>
+      )}
+
+      {/* 예외 규칙 후보 */}
+      {activeSubTab === 'exceptions' && (
+        <div className="bg-slate-800/50 rounded-xl border border-slate-700 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-700/50">
+              <tr>
+                <th className="text-left p-3">패턴 ID</th>
+                <th className="text-left p-3">예외 유형</th>
+                <th className="text-left p-3">예외 패턴</th>
+                <th className="text-right p-3">발생</th>
+                <th className="text-right p-3">신뢰도</th>
+                <th className="text-center p-3">액션</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-700">
+              {exceptions.length === 0 ? (
+                <tr><td colSpan={6} className="p-8 text-center text-slate-500">예외 규칙 후보가 없습니다</td></tr>
+              ) : (
+                exceptions.map((ex) => (
+                  <tr key={ex.id} className="hover:bg-slate-700/30">
+                    <td className="p-3 font-mono text-xs">{ex.pattern_id}</td>
+                    <td className="p-3">{ex.exception_type}</td>
+                    <td className="p-3"><code className="bg-slate-700 px-1 rounded text-xs">{ex.exception_pattern}</code></td>
+                    <td className="p-3 text-right">{ex.occurrence_count}</td>
+                    <td className={`p-3 text-right font-bold ${getConfidenceColor(ex.confidence)}`}>{(ex.confidence * 100).toFixed(0)}%</td>
+                    <td className="p-3 text-center">
+                      <div className="flex gap-1 justify-center">
+                        <button onClick={() => handleAction(ex.id, 'approve', true)} className="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs hover:bg-emerald-500/30">승인</button>
+                        <button onClick={() => handleAction(ex.id, 'reject', true)} className="px-2 py-1 bg-slate-500/20 text-slate-400 rounded text-xs hover:bg-slate-500/30">반려</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// 이력 탭 컴포넌트
+// ============================================
+function HistoryTab({ apiBase }) {
+  const [history, setHistory] = useState([]);
+  const [stats, setStats] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState({ learning_type: '', target_type: '' });
+
+  useEffect(() => {
+    loadData();
+  }, [filter]);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams();
+      if (filter.learning_type) params.append('learning_type', filter.learning_type);
+      if (filter.target_type) params.append('target_type', filter.target_type);
+      params.append('limit', '100');
+
+      const [historyRes, statsRes] = await Promise.all([
+        fetch(`${apiBase}/v1/learning/candidates?status=approved&${params}`).then(r => r.json()),
+        fetch(`${apiBase}/v1/performance/report`).then(r => r.json()),
+      ]);
+
+      if (historyRes.success) setHistory(historyRes.data || []);
+      if (statsRes.success) setStats(statsRes.data);
+    } catch (err) {
+      console.error('Failed to load history:', err);
+    }
+    setLoading(false);
+  };
+
+  const LEARNING_TYPES = {
+    exception_generated: { label: '예외 규칙', icon: '🔵' },
+    confidence_adjusted: { label: '신뢰도 조정', icon: '🟢' },
+    pattern_suggested: { label: '새 패턴', icon: '🟡' },
+    mapping_learned: { label: '매핑 규칙', icon: '🟣' },
+    severity_adjusted: { label: '심각도 조정', icon: '🔴' },
+    context_modifier_updated: { label: '맥락 보정', icon: '⚪' },
+  };
+
+  const APPLIED_BY = { auto: '🤖 자동', manual: '👤 수동' };
+
+  // 날짜별 그룹화
+  const groupedHistory = history.reduce((acc, item) => {
+    const date = (item.applied_at || item.created_at)?.split('T')[0] || 'unknown';
+    if (!acc[date]) acc[date] = [];
+    acc[date].push(item);
+    return acc;
+  }, {});
+
+  return (
+    <div className="space-y-4">
+      {/* 헤더 */}
+      <div className="flex justify-between items-center">
+        <div>
+          <h2 className="text-lg font-semibold">📜 개선 이력</h2>
+          <p className="text-sm text-slate-400">시스템 개선 적용 내역을 확인합니다</p>
+        </div>
+        <button onClick={loadData} className="px-3 py-1 bg-slate-700 hover:bg-slate-600 rounded text-sm">🔄 새로고침</button>
+      </div>
+
+      {/* 효과 요약 */}
+      <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
+        <h3 className="font-semibold mb-3 text-sm">개선 효과 요약</h3>
+        <div className="grid grid-cols-4 gap-3">
+          <StatCard title="이번 주" value={stats?.improvements_this_week || history.filter(h => {
+            const d = new Date(h.applied_at || h.created_at);
+            const now = new Date();
+            const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+            return d >= weekAgo;
+          }).length} color="blue" />
+          <StatCard title="이번 달" value={stats?.improvements_this_month || history.filter(h => {
+            const d = new Date(h.applied_at || h.created_at);
+            const now = new Date();
+            return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
+          }).length} color="cyan" />
+          <StatCard title="자동 적용" value={history.filter(h => h.status === 'auto_applied').length} color="emerald" />
+          <StatCard title="수동 적용" value={history.filter(h => h.status === 'approved').length} color="slate" />
+        </div>
+      </div>
+
+      {/* 필터 */}
+      <div className="flex gap-3">
+        <select value={filter.learning_type} onChange={(e) => setFilter({ ...filter, learning_type: e.target.value })} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+          <option value="">전체 유형</option>
+          {Object.entries(LEARNING_TYPES).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+        </select>
+        <select value={filter.target_type} onChange={(e) => setFilter({ ...filter, target_type: e.target.value })} className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-sm">
+          <option value="">전체 대상</option>
+          <option value="pattern">패턴</option>
+          <option value="mapping">매핑</option>
+          <option value="exception">예외</option>
+          <option value="procedure">시술</option>
+        </select>
+      </div>
+
+      {/* 타임라인 */}
+      {loading ? (
+        <div className="text-center py-12 text-slate-500">로딩 중...</div>
+      ) : Object.keys(groupedHistory).length === 0 ? (
+        <div className="text-center py-12 text-slate-500">이력이 없습니다</div>
+      ) : (
+        <div className="space-y-6">
+          {Object.entries(groupedHistory).map(([date, items]) => (
+            <div key={date}>
+              <div className="text-sm font-semibold text-slate-400 mb-3 sticky top-0 bg-slate-900 py-2">
+                {new Date(date).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
+              </div>
+              <div className="space-y-3">
+                {items.map((item) => {
+                  const typeInfo = LEARNING_TYPES[item.learning_type] || { label: item.learning_type, icon: '❓' };
+                  return (
+                    <div key={item.id} className="bg-slate-800/50 rounded-xl p-4 border border-slate-700 flex items-start gap-4">
+                      <div className="text-2xl">{typeInfo.icon}</div>
+                      <div className="flex-1">
+                        <div className="flex justify-between items-start">
+                          <div>
+                            <span className="font-semibold">{typeInfo.label}</span>
+                            <span className="mx-2 text-slate-600">|</span>
+                            <span className="text-slate-400">{item.target_type}</span>
+                          </div>
+                          <span className="text-xs text-slate-500">{new Date(item.applied_at || item.created_at).toLocaleTimeString('ko-KR')}</span>
+                        </div>
+                        <div className="text-sm text-slate-400 mt-1">대상: <span className="font-mono text-white">{item.target_id}</span></div>
+                        <div className="text-xs text-slate-500 mt-1">적용: {APPLIED_BY[item.status === 'auto_applied' ? 'auto' : 'manual']}</div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

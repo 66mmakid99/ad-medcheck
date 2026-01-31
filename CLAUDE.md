@@ -4,7 +4,7 @@
 
 **AD-MEDCHECK (MADMEDCHECK)** is a Medical Advertisement Compliance Analysis System for Korean medical advertisements. It automatically detects and analyzes potential violations of Korean medical advertising laws (의료법) and related regulations.
 
-**Current Version:** Engine v1.3.0 / Dashboard v1.3.0
+**Current Version:** Engine v1.4.0 / Dashboard v1.4.0
 **Language:** Korean (한국어) with English documentation
 **License:** ISC
 **Last Updated:** 2026-01-31
@@ -52,28 +52,19 @@ ad-medcheck/
 │   │   │   ├── logger.ts
 │   │   │   └── tracer.ts
 │   │   ├── modules/
-│   │   │   ├── violation-detector/     # 위반 탐지 모듈 (v2.0)
-│   │   │   │   ├── index.ts            # 통합 탐지기
-│   │   │   │   ├── pattern-matcher.ts  # 패턴 매칭 + 오탐방지
-│   │   │   │   ├── rule-engine.ts      # 규칙 엔진
-│   │   │   │   ├── compound-detector.ts # 복합 위반 탐지
-│   │   │   │   ├── department-rules.ts  # 진료과목별 규칙
-│   │   │   │   └── impression-analyzer.ts # 인상 분석
-│   │   │   ├── mandatory-checker/      # 필수 기재사항 검사
-│   │   │   │   └── index.ts
-│   │   │   ├── ocr-analyzer/           # OCR 분석 (6단계 구현)
+│   │   │   ├── violation-detector/
 │   │   │   │   ├── index.ts
-│   │   │   │   ├── preprocessing.ts
-│   │   │   │   ├── text-extraction.ts
-│   │   │   │   ├── medical-term-recognizer.ts
-│   │   │   │   ├── image-categorizer.ts
-│   │   │   │   └── types.ts
+│   │   │   │   ├── pattern-matcher.ts
+│   │   │   │   └── rule-engine.ts
 │   │   │   └── ai-analyzer/
 │   │   │       ├── index.ts
-│   │   │       ├── context-analyzer.ts # 문맥 분석 강화
+│   │   │       ├── context-analyzer.ts
 │   │   │       └── llm-client.ts
+│   │   ├── services/               # 자동 개선 시스템 (v1.4.0)
+│   │   │   ├── performance-tracker.ts  # 패턴 성능 추적
+│   │   │   └── auto-learner.ts         # 자동 학습 모듈
 │   │   ├── adapters/
-│   │   │   ├── ocr-adapter.ts     # OCR 어댑터 (구현 완료)
+│   │   │   ├── ocr-adapter.ts     # OCR 이미지 분석
 │   │   │   └── scv-adapter.ts
 │   │   └── db/
 │   │       ├── d1.ts
@@ -85,7 +76,9 @@ ad-medcheck/
 │   │   ├── 003_pricing_module.sql
 │   │   ├── 004_pricing_v2_upgrade.sql
 │   │   ├── 005_crawl_status.sql
-│   │   └── 006_collected_hospitals_and_sessions.sql
+│   │   ├── 006_collected_hospitals_and_sessions.sql
+│   │   ├── 007_extracted_prices.sql
+│   │   └── 008_feedback_system.sql    # 자동 개선 시스템 (v1.4.0)
 │   ├── dashboard/                 # Dashboard JSX (dev reference)
 │   ├── package.json
 │   ├── tsconfig.json
@@ -138,7 +131,7 @@ ad-medcheck/
 
 ---
 
-## Dashboard Features (10 Tabs)
+## Dashboard Features (14 Tabs)
 
 | Tab | Name | Description |
 |-----|------|-------------|
@@ -152,6 +145,10 @@ ad-medcheck/
 | 🔄 | Mapping Approval | Approve/reject unmapped procedure names |
 | ⚠️ | Exceptions/FP | False positive stats, exception suggestions |
 | 🎭 | Tricks | Evasion pattern management |
+| 📥 | Feedback | User feedback collection, approve/reject (v1.4.0) |
+| 📈 | Performance | Pattern accuracy tracking, flagged patterns (v1.4.0) |
+| 🔧 | Improvements | Learning candidates, exception candidates (v1.4.0) |
+| 📜 | History | Improvement history timeline (v1.4.0) |
 
 ---
 
@@ -197,6 +194,45 @@ cd medcheck-dashboard && npm run build
 
 # Crawler - Seoul hospitals
 cd medcheck-scv && npm run crawl:seoul
+```
+
+---
+
+## D1 SQL Migration Rules
+
+Cloudflare D1 has limited SQLite feature support. Follow these rules strictly:
+
+### Prohibited (DO NOT USE)
+| Feature | Reason |
+|---------|--------|
+| `CREATE TRIGGER` | D1 does not support triggers |
+| `CREATE VIEW` | D1 does not support views |
+| `FOREIGN KEY` | D1 ignores foreign key constraints |
+| Multi-row `INSERT VALUES` | Use separate INSERT statements |
+| `CHECK (..., NULL)` | Use `IS NULL OR IN (...)` instead |
+
+### Allowed
+| Feature | Example |
+|---------|---------|
+| `CREATE TABLE IF NOT EXISTS` | Standard table creation |
+| `CREATE INDEX IF NOT EXISTS` | Index creation |
+| `INSERT OR IGNORE` | Safe insert with conflict handling |
+| `DROP TABLE IF EXISTS` | Safe table removal |
+
+### Example Migration
+```sql
+-- Good: Separate INSERT statements
+INSERT OR IGNORE INTO settings (key, value) VALUES ('key1', 'val1');
+INSERT OR IGNORE INTO settings (key, value) VALUES ('key2', 'val2');
+
+-- Bad: Multi-row INSERT
+INSERT INTO settings (key, value) VALUES ('key1', 'val1'), ('key2', 'val2');
+
+-- Good: NULL check
+CHECK (col IS NULL OR col IN ('a', 'b', 'c'))
+
+-- Bad: NULL in IN clause
+CHECK (col IN ('a', 'b', 'c', NULL))
 ```
 
 ---
@@ -279,6 +315,84 @@ cd medcheck-scv && npm run crawl:seoul
 | POST | `/v1/mapping-candidates/:id/approve` | Approve mapping |
 | POST | `/v1/mapping-candidates/:id/reject` | Reject mapping |
 
+### Feedback API (v1.4.0 확장)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/v1/feedback` | 기본 피드백 (기존) |
+| POST | `/v1/feedback/violation` | 위반 탐지 피드백 (확장) |
+| POST | `/v1/feedback/price` | 가격 추출 피드백 |
+| GET | `/v1/feedback/stats` | 피드백 통계 |
+| GET | `/v1/feedback/stats/pattern/:id` | 패턴별 통계 |
+| GET | `/v1/feedback/pending` | 검토 대기 피드백 |
+| POST | `/v1/feedback/:id/review` | 피드백 검토 처리 |
+
+### Performance Tracking API (v1.4.0 신규)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/performance/patterns` | 패턴 성능 목록 |
+| GET | `/v1/performance/patterns/:id` | 패턴별 상세 성능 |
+| POST | `/v1/performance/aggregate` | 성능 집계 실행 |
+| GET | `/v1/performance/report` | 성능 리포트 |
+| GET | `/v1/performance/flagged` | 저성능 패턴 목록 |
+
+### Auto Learning API (v1.4.0 신규)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/learning/candidates` | 학습 후보 목록 |
+| GET | `/v1/learning/auto-apply-eligible` | 자동 적용 가능 목록 |
+| POST | `/v1/learning/candidates/:id/approve` | 학습 후보 승인 |
+| POST | `/v1/learning/candidates/:id/reject` | 학습 후보 거부 |
+| POST | `/v1/learning/generate-exceptions` | 예외 후보 생성 트리거 |
+| POST | `/v1/learning/extract-patterns` | 패턴 후보 추출 |
+| POST | `/v1/learning/learn-mappings` | 매핑 패턴 학습 |
+| GET | `/v1/exception-candidates` | 예외 후보 목록 |
+| POST | `/v1/exception-candidates/:id/approve` | 예외 후보 승인 |
+| POST | `/v1/exception-candidates/:id/reject` | 예외 후보 거부 |
+
+---
+
+## Auto-Improvement System (v1.4.0)
+
+### Architecture
+```
+[데이터 수집] → [분석 엔진] → [결과 반환] → [사용자 피드백]
+                                                    │
+                              ┌─────────────────────┴───────────────────┐
+                              ▼                                         ▼
+                    [성능 추적 서비스]                           [자동 학습 모듈]
+                    - 패턴별 정확도                              - 예외 규칙 생성
+                    - 맥락별 성능                                - 신뢰도 조정
+                    - 저성능 플래그                              - 매핑 패턴 학습
+                              │                                         │
+                              └─────────────┬───────────────────────────┘
+                                            ▼
+                                    [자동 개선 적용]
+```
+
+### Key Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| PerformanceTracker | `services/performance-tracker.ts` | 패턴 성능 집계/추적 |
+| AutoLearner | `services/auto-learner.ts` | 자동 학습/규칙 생성 |
+| FeedbackAPI | `api/routes/feedback.ts` | 피드백 수집 API |
+
+### Feedback Types
+| Type | Description | Auto-Learning |
+|------|-------------|---------------|
+| `true_positive` | 정탐 (맞음) | 신뢰도 강화 |
+| `false_positive` | 오탐 (잘못 탐지) | 예외 규칙 생성 |
+| `false_negative` | 미탐 (놓침) | 새 패턴 후보 |
+| `severity_adjust` | 심각도 조정 | 심각도 재학습 |
+
+### Auto-Apply Criteria
+| Learning Type | Auto-Apply | Review Required |
+|--------------|------------|-----------------|
+| 예외 규칙 | 신뢰도 95%+ & 10건+ | 80%+ |
+| 신뢰도 조정 | 변동폭 ±10% 이내 | 10%+ |
+| 매핑 학습 | 일치 패턴 5건+ | 3건+ |
+| 새 패턴 | - | 항상 |
+
 ---
 
 ## Pattern System
@@ -337,9 +451,9 @@ cd medcheck-scv && npm run crawl:seoul
 | Gemini Flash | ~₩1.1 |
 
 ### Current Status
-- Pattern matching: Fully implemented (v2.0 with false positive prevention)
+- Pattern matching: Fully implemented
 - AI analysis: Implemented but NOT tested for accuracy
-- OCR: Fully implemented (6-phase pipeline with Google Vision API)
+- OCR: Interface only (NOT IMPLEMENTED)
 
 ---
 
@@ -367,6 +481,19 @@ cd medcheck-scv && npm run crawl:seoul
 | `ai_decisions` | AI decision records |
 | `competitor_settings` | Competitor monitoring |
 
+### 자동 개선 시스템 테이블 (v1.4.0)
+| Table | Purpose |
+|-------|---------|
+| `analysis_feedback_v2` | 확장된 분석 피드백 |
+| `pattern_performance` | 패턴별 성능 집계 |
+| `context_performance` | 맥락별 성능 |
+| `department_performance` | 진료과목별 성능 |
+| `price_extraction_feedback` | 가격 추출 피드백 |
+| `auto_learning_log` | 자동 학습 로그 |
+| `exception_candidates` | 예외 규칙 후보 |
+| `mapping_learning_data` | 매핑 학습 데이터 |
+| `feedback_settings` | 피드백/학습 설정 |
+
 ---
 
 ## Development Status
@@ -380,107 +507,21 @@ cd medcheck-scv && npm run crawl:seoul
 - Auto pipeline (Naver → Google → Analysis)
 - Dashboard deployment (Cloudflare Pages)
 - Real-time dashboard integration (5s polling)
-- **OCR 이미지 분석 시스템** (2026-01-31)
-  - 6단계 파이프라인: 전처리→텍스트추출→의료용어인식→카테고리분류→분석→리포트
-  - Google Cloud Vision API 통합
-  - 의료광고 특화 전처리 (before/after, 가격표 등)
-- **위반 탐지 분석 강화** (2026-01-31)
-  - 오탐 방지: 8가지 문맥 예외 처리 (부정어, 질문, 면책, 법적고지 등)
-  - 복합 위반 탐지: AND/OR/AND_NOT/SEQUENCE 연산자, 9개 규칙
-  - 진료과목별 특화: 9개 진료과목 (피부과, 성형외과, 치과 등)
-  - 전체 인상 분석: 어조/신뢰도/위험도 평가
-  - 필수 기재사항 검사: 의료기관명, 연락처, 소재지 등
+- OCR 이미지 분석 시스템 (Phase 1-6)
+- **자동 개선 시스템 Phase 1** (v1.4.0)
+  - 피드백 인프라 (확장 피드백 수집)
+  - 성능 추적 서비스 (패턴별/맥락별/진료과목별)
+  - 자동 학습 기초 모듈 (예외 후보 생성, 신뢰도 조정)
 
 ### In Progress
 - AI Hybrid analysis testing
 - Trick pattern collection
+- 자동 개선 시스템 Phase 2 (자동 적용 로직)
 
 ### Not Implemented
 - AI accuracy verification
 - CSV output format improvement (user fixing)
-
----
-
-## Violation Detector v2.0 (위반 탐지 강화 시스템)
-
-### Overview
-95% 정확도 목표로 구현된 통합 위반 탐지 시스템
-
-### Modules
-
-#### 1. Pattern Matcher (오탐 방지 강화)
-| 문맥 예외 타입 | 설명 | 예시 |
-|--------------|------|------|
-| NEGATION_BEFORE | 앞에 부정어 | "절대 100% 완치라고 하면 안 됩니다" |
-| NEGATION_AFTER | 뒤에 부정어 | "100% 완치는 불가능합니다" |
-| DISCLAIMER | 면책 조항 | "개인에 따라 효과가 다를 수 있습니다" |
-| QUESTION | 의문문 | "100% 완치가 가능한가요?" |
-| QUOTATION | 인용문 | "'100% 완치'라는 표현은 위반입니다" |
-| LEGAL_NOTICE | 법적 고지 | "의료법에 따라 100%라는 표현은 금지" |
-| NEGATIVE_EXAMPLE | 부정적 예시 | "다음은 위반 사례: 100% 완치 보장" |
-| CONDITIONAL | 조건문 | "만약 100% 완치를 약속하면 위반" |
-
-#### 2. Compound Detector (복합 위반)
-| 규칙 ID | 설명 | 연산자 |
-|--------|------|--------|
-| CPD-001 | 가격유인 + 효과보장 | AND |
-| CPD-002 | 전후사진 + 결과보장 | AND |
-| CPD-003 | 최상급 + 비교광고 | OR |
-| CPD-004 | 무통/무흉터 + 확정표현 | AND_NOT |
-| CPD-005 | 시술순서 패턴 | SEQUENCE |
-
-#### 3. Department Rules (진료과목별 규칙)
-| 진료과목 | 특화 규칙 예시 |
-|---------|--------------|
-| dermatology | 피부재생/탄력/미백 보장 금지 |
-| plastic_surgery | 자연스러운 결과 보장 금지 |
-| dental | 임플란트 수명 보장 금지 |
-| oriental | 한방치료 효과 과장 금지 |
-| psychiatry | 정신건강 치료 보장 금지 |
-
-#### 4. Impression Analyzer (전체 인상 분석)
-| 분석 항목 | 등급 |
-|----------|------|
-| Tone | PROFESSIONAL, PROMOTIONAL, AGGRESSIVE, SENSATIONAL |
-| Credibility | HIGH, MEDIUM, LOW, SUSPICIOUS |
-| Risk Level | SAFE, LOW, MEDIUM, HIGH, CRITICAL |
-
-#### 5. Mandatory Checker (필수 기재사항)
-| 항목 | 필수 여부 |
-|------|----------|
-| 의료기관명 | 필수 |
-| 전화번호 | 필수 |
-| 소재지/주소 | 필수 |
-| 진료과목 | 권장 |
-| 전문의 자격 | 권장 |
-
-### API Usage
-```typescript
-// 전체 분석
-POST /v1/analyze
-{
-  "text": "분석할 텍스트",
-  "options": {
-    "enableExtendedAnalysis": true,
-    "enableCompoundDetection": true,
-    "enableDepartmentRules": true,
-    "enableImpressionAnalysis": true,
-    "enableMandatoryCheck": true
-  }
-}
-
-// 응답에 포함되는 항목
-{
-  "matches": [...],           // 패턴 매칭 결과
-  "judgment": {...},          // 위반 판정
-  "compoundViolations": [...],// 복합 위반
-  "departmentViolations": [...],// 진료과목별 위반
-  "impressionAnalysis": {...},// 인상 분석
-  "mandatoryCheck": {...},    // 필수 기재사항
-  "overallRiskScore": 75,     // 종합 위험 점수
-  "overallComplianceScore": 65// 규정 준수 점수
-}
-```
+- 자동 개선 시스템 Phase 3 (A/B 테스트)
 
 ---
 
@@ -521,17 +562,17 @@ Example: P-56-01-001
 
 1. **CSV Output Format**: User is fixing manually
 2. **AI Analysis Testing**: Accuracy not verified (Pattern vs AI Hybrid)
+3. **OCR Not Implemented**: Need Google Vision or similar integration
 
 ---
 
 ## Recent Commits
 
 ```
-2304d71 feat: 위반 탐지 분석 강화 시스템 완전 구현
+(pending) feat: 자동 개선 시스템 Phase 1 구현 (피드백 인프라)
+020abfd Merge pull request #12
 ff9db4b fix: SQL 마이그레이션 문법 수정
-58550e2 chore: update package-lock.json
 d66aec2 feat: OCR 이미지 분석 시스템 완전 구현 (Phase 1-6)
-8779109 docs: CLAUDE.md 전체 업데이트 - 배포URL, 대시보드, 파이프라인, API 문서화
 2447982 feat: 자동 파이프라인 완성 (네이버→구글→분석 연속 실행)
 ```
 

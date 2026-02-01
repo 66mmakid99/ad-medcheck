@@ -481,6 +481,7 @@ function AnalyzeTab({ apiBase }) {
   };
 
   const gradeColors = {
+    'S': 'text-cyan-400 bg-cyan-500/20',
     'A': 'text-emerald-400 bg-emerald-500/20',
     'B': 'text-blue-400 bg-blue-500/20',
     'C': 'text-yellow-400 bg-yellow-500/20',
@@ -522,15 +523,18 @@ function AnalyzeTab({ apiBase }) {
         <div className="bg-slate-800/50 rounded-xl p-4 border border-slate-700">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-semibold">분석 결과</h3>
-            <span className={`px-3 py-1 rounded-lg font-bold text-lg ${gradeColors[result.grade]}`}>
-              {result.grade}등급
-            </span>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl">{result.score?.gradeInfo?.emoji || '📊'}</span>
+              <span className={`px-3 py-1 rounded-lg font-bold text-lg ${gradeColors[result.grade]}`}>
+                {result.score?.gradeInfo?.status || result.grade + '등급'}
+              </span>
+            </div>
           </div>
-
+          
           <div className="grid grid-cols-3 gap-3 mb-4">
+            <StatCard title="청정지수" value={`${result.score?.cleanScore || 0}점`} color={result.score?.cleanScore >= 70 ? 'emerald' : result.score?.cleanScore >= 50 ? 'yellow' : 'red'} />
             <StatCard title="위반 항목" value={result.violationCount} color={result.violationCount > 0 ? 'red' : 'emerald'} />
-            <StatCard title="Critical" value={result.bySeverity?.critical || 0} color="red" />
-            <StatCard title="Major" value={result.bySeverity?.major || 0} color="orange" />
+            <StatCard title="Critical" value={result.score?.severityDeductions?.critical || 0} color="red" />
           </div>
 
           {result.violations?.length > 0 && (
@@ -539,14 +543,16 @@ function AnalyzeTab({ apiBase }) {
               {result.violations.map((v, i) => (
                 <div key={i} className="bg-slate-700/30 rounded-lg p-3 text-sm">
                   <div className="flex items-start gap-2">
-                    <span className={`px-1.5 py-0.5 text-xs rounded ${v.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
-                        v.severity === 'major' ? 'bg-orange-500/20 text-orange-400' :
-                          'bg-yellow-500/20 text-yellow-400'
-                      }`}>{v.severity}</span>
+                    <span className={`px-1.5 py-0.5 text-xs rounded ${
+                      v.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
+                      v.severity === 'major' ? 'bg-orange-500/20 text-orange-400' :
+                      'bg-yellow-500/20 text-yellow-400'
+                    }`}>{v.severity}</span>
                     <div>
                       <p className="font-medium">{v.description}</p>
-                      <p className="text-slate-400 text-xs mt-1">발견: "{v.matched}"</p>
+                      <p className="text-slate-400 text-xs mt-1">발견: "{v.matchedText}"</p>
                       {v.legalBasis && <p className="text-slate-500 text-xs mt-1">근거: {Array.isArray(v.legalBasis) ? v.legalBasis[0]?.article : v.legalBasis}</p>}
+                      {v.suggestion && <p className="text-cyan-400 text-xs mt-1">💡 {v.suggestion}</p>}
                     </div>
                   </div>
                 </div>
@@ -608,6 +614,7 @@ function AdCheckTab({ apiBase }) {
   };
 
   const gradeColors = {
+    'S': 'text-cyan-400 bg-cyan-500/20',
     'A': 'text-emerald-400 bg-emerald-500/20',
     'B': 'text-blue-400 bg-blue-500/20',
     'C': 'text-yellow-400 bg-yellow-500/20',
@@ -682,8 +689,8 @@ function AdCheckTab({ apiBase }) {
                       <p className="font-medium">{h.hospital_name || h.name}</p>
                       <p className="text-xs text-slate-400">{h.sido} {h.sigungu}</p>
                       {h.homepage && (
-                        <a href={h.homepage} target="_blank" rel="noopener noreferrer"
-                          className="text-xs text-blue-400 hover:underline" onClick={(e) => e.stopPropagation()}>
+                        <a href={h.homepage} target="_blank" rel="noopener noreferrer" 
+                           className="text-xs text-blue-400 hover:underline" onClick={(e) => e.stopPropagation()}>
                           {h.homepage.slice(0, 30)}...
                         </a>
                       )}
@@ -716,7 +723,7 @@ function AdCheckTab({ apiBase }) {
                 <p className="text-sm text-slate-400">{hospitalDetail.sido} {hospitalDetail.sigungu}</p>
                 {hospitalDetail.homepage && (
                   <a href={hospitalDetail.homepage} target="_blank" rel="noopener noreferrer"
-                    className="text-sm text-blue-400 hover:underline">
+                     className="text-sm text-blue-400 hover:underline">
                     {hospitalDetail.homepage}
                   </a>
                 )}
@@ -753,10 +760,11 @@ function AdCheckTab({ apiBase }) {
                   hospitalDetail.violations.map((v, i) => (
                     <div key={i} className="bg-slate-700/30 rounded-lg p-3 text-sm">
                       <div className="flex items-start gap-2">
-                        <span className={`px-1.5 py-0.5 text-xs rounded whitespace-nowrap ${v.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
-                            v.severity === 'major' ? 'bg-orange-500/20 text-orange-400' :
-                              'bg-yellow-500/20 text-yellow-400'
-                          }`}>{v.severity}</span>
+                        <span className={`px-1.5 py-0.5 text-xs rounded whitespace-nowrap ${
+                          v.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
+                          v.severity === 'major' ? 'bg-orange-500/20 text-orange-400' :
+                          'bg-yellow-500/20 text-yellow-400'
+                        }`}>{v.severity}</span>
                         <div className="flex-1">
                           <p className="font-medium">{v.description || v.pattern_description}</p>
                           {v.matched && <p className="text-slate-400 text-xs mt-1">발견: "{v.matched}"</p>}
@@ -871,10 +879,10 @@ function BatchAnalyzeTab({ apiBase }) {
             summary: data.data.summary || `${data.data.violationCount}건 위반`
           });
         } else {
-          newResults.push({ ...h, status: 'error', grade: '-', violationCount: 0, summary: data.error });
+          newResults.push({ ...h, status: 'error', grade: '-', violationCount: 0, summary: data.error?.message || '분석 실패' });
         }
       } catch (e) {
-        newResults.push({ ...h, status: 'error', grade: '-', violationCount: 0, summary: e.message });
+        newResults.push({ ...h, status: 'error', grade: '-', violationCount: 0, summary: e.message || '네트워크 오류' });
       }
 
       setResults([...newResults]);
@@ -885,6 +893,7 @@ function BatchAnalyzeTab({ apiBase }) {
   };
 
   const gradeColors = {
+    'S': 'text-cyan-400 bg-cyan-500/20',
     'A': 'text-emerald-400 bg-emerald-500/20',
     'B': 'text-blue-400 bg-blue-500/20',
     'C': 'text-yellow-400 bg-yellow-500/20',
@@ -987,7 +996,7 @@ function BatchAnalyzeTab({ apiBase }) {
                     </span>
                   </td>
                   <td className="p-3 text-slate-300 text-xs max-w-[300px] truncate">
-                    {r.summary}
+                    {typeof r.summary === 'string' ? r.summary : '분석 완료'}
                   </td>
                 </tr>
               ))}
@@ -1000,8 +1009,8 @@ function BatchAnalyzeTab({ apiBase }) {
       {results.length > 0 && !analyzing && (
         <div className="grid grid-cols-6 gap-3">
           <StatCard title="분석 완료" value={results.filter(r => r.status === 'success').length} color="emerald" />
-          <StatCard title="분석 실패" value={results.filter(r => r.status === 'error').length} color="red" />
-          <StatCard title="A등급" value={results.filter(r => r.grade === 'A').length} color="emerald" />
+          <StatCard title="URL 없음" value={results.filter(r => r.status === 'skip').length} color="slate" />
+          <StatCard title="S/A등급" value={results.filter(r => r.grade === 'S' || r.grade === 'A').length} color="cyan" />
           <StatCard title="B등급" value={results.filter(r => r.grade === 'B').length} color="blue" />
           <StatCard title="C등급" value={results.filter(r => r.grade === 'C').length} color="yellow" />
           <StatCard title="D/F등급" value={results.filter(r => r.grade === 'D' || r.grade === 'F').length} color="red" />

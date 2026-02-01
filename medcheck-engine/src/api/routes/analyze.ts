@@ -226,11 +226,11 @@ analyzeRoutes.post('/', async (c) => {
             processingTimeMs: aiResult.aiProcessingTimeMs,
             reasoning: body.options?.detailed
               ? aiResult.aiAnalyzedItems.map(item => ({
-                  text: item.target.text,
-                  isViolation: item.result.isViolation,
-                  confidence: item.result.confidence,
-                  reasoning: item.result.reasoning,
-                }))
+                text: item.target.text,
+                isViolation: item.result.isViolation,
+                confidence: item.result.confidence,
+                reasoning: item.result.reasoning,
+              }))
               : undefined,
           };
         } catch (aiError) {
@@ -314,6 +314,101 @@ analyzeRoutes.post('/', async (c) => {
       } as AnalyzeResponse,
       500
     );
+  }
+});
+/**
+ * POST /v1/analyze-url - URL 기반 텍스트 분석
+ * 대시보드 배치 분석용
+ */
+analyzeRoutes.post('-url', async (c) => {
+  let body: { url: string; hospitalId?: number; hospitalName?: string };
+
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return c.json({
+      success: false,
+      error: { code: 'PARSE_ERROR', message: 'Invalid JSON in request body' },
+    }, 400);
+  }
+
+  if (!body.url) {
+    return c.json({
+      success: false,
+      error: { code: 'INVALID_INPUT', message: 'url 필드는 필수입니다.' },
+    }, 400);
+  }
+
+  try {
+    const startTime = Date.now();
+
+    // 1. URL에서 HTML 가져오기
+    const htmlResponse = await fetch(body.url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; MedCheck-Analyzer/1.0)',
+        'Accept': 'text/html',
+      },
+    });
+
+    if (!htmlResponse.ok) {
+      return c.json({
+        success: false,
+        error: {
+          code: 'FETCH_ERROR',
+          message: `URL 접근 실패: ${htmlResponse.status} ${htmlResponse.statusText}`
+        },
+      }, 400);
+    }
+
+    const html = await htmlResponse.text();
+
+    // 2. 텍스트 추출 (HTML 태그 제거)
+    const textContent = html
+      .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
+      .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .substring(0, 50000);
+
+    if (textContent.length < 10) {
+      return c.json({
+        success: false,
+        error: { code: 'EMPTY_CONTENT', message: '분석할 텍스트가 부족합니다.' },
+      }, 400);
+    }
+
+    // 3. 패턴 매칭 분석
+    const result = violationDetector.analyze({ text: textContent });
+
+    const totalProcessingTime = Date.now() - startTime;
+
+    // 4. 응답 생성
+    return c.json({
+      success: true,
+      data: {
+        analysisId: result.id,
+        url: body.url,
+        hospitalId: body.hospitalId,
+        hospitalName: body.hospitalName,
+        inputLength: textContent.length,
+        violationCount: result.judgment.violations.length,
+        violations: result.judgment.violations,
+        score: result.judgment.score,
+        grade: result.judgment.score.grade,
+        gradeDescription: result.judgment.score.gradeDescription,
+        summary: result.judgment.summary,
+        recommendations: result.judgment.recommendations,
+        processingTimeMs: totalProcessingTime,
+        analyzedAt: result.judgment.analyzedAt.toISOString(),
+      },
+    });
+  } catch (error) {
+    const err = error as Error;
+    return c.json({
+      success: false,
+      error: { code: 'ANALYSIS_ERROR', message: err.message },
+    }, 500);
   }
 });
 
@@ -770,14 +865,14 @@ analyzeRoutes.post('/url-with-images', async (c) => {
         for (const imgViolation of allViolations) {
           results.combinedViolations.push({
             type: imgViolation.type === 'BEFORE_AFTER' ? 'before_after' :
-                  imgViolation.type === 'GUARANTEE' ? 'guarantee' :
-                  imgViolation.type === 'EXAGGERATION' ? 'exaggeration' :
+              imgViolation.type === 'GUARANTEE' ? 'guarantee' :
+                imgViolation.type === 'EXAGGERATION' ? 'exaggeration' :
                   imgViolation.type === 'PRICE_INDUCEMENT' ? 'price_inducement' :
-                  imgViolation.type === 'TESTIMONIAL' ? 'testimonial' : 'other',
+                    imgViolation.type === 'TESTIMONIAL' ? 'testimonial' : 'other',
             status: imgViolation.confidence >= 0.85 ? 'violation' :
-                    imgViolation.confidence >= 0.7 ? 'likely' : 'possible',
+              imgViolation.confidence >= 0.7 ? 'likely' : 'possible',
             severity: imgViolation.severity === 'critical' ? 'high' :
-                      imgViolation.severity === 'major' ? 'medium' : 'low',
+              imgViolation.severity === 'major' ? 'medium' : 'low',
             matchedText: imgViolation.text,
             description: imgViolation.description,
             legalBasis: imgViolation.legalBasis ? [{

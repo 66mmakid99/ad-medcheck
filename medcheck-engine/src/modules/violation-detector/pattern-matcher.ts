@@ -5,7 +5,11 @@
  * 오탐 방지 강화:
  * - 맥락 예외 처리 (부정문, 면책조항, 질문문 등)
  * - 문장 내 중복 제거
- * - 신뢰도 기반 필터링
+ * - 신뢰도 기반 필터링 (50% 미만 완전 필터링)
+ * 
+ * v1.1 수정사항:
+ * - minConfidence 기본값 0.5로 변경 (50% 미만 필터링)
+ * - 맥락 예외 감지 시 완전 필터링 (continue)
  */
 
 import patternsData from '../../../patterns/patterns.json';
@@ -182,7 +186,7 @@ export interface MatchOptions {
   enableContextExceptionFilter?: boolean;
   /** 문장 내 중복 제거 활성화 (기본: true) */
   enableSentenceDedup?: boolean;
-  /** 최소 신뢰도 (이하는 필터링) */
+  /** 최소 신뢰도 (이하는 필터링, 기본: 0.5) */
   minConfidence?: number;
   /** 맥락 예외 검사 범위 (앞뒤 문자 수) */
   contextExceptionRange?: number;
@@ -228,7 +232,8 @@ export class PatternMatcher {
       maxMatches = 100,
       enableContextExceptionFilter = true,
       enableSentenceDedup = true,
-      minConfidence = 0,
+      // ✅ 수정: 기본값 0.5로 변경 (50% 미만 필터링)
+      minConfidence = 0.5,
       contextExceptionRange = 30,
     } = options;
 
@@ -291,8 +296,7 @@ export class PatternMatcher {
         // 신뢰도 계산
         let confidence = this.calculateConfidence(pattern, matchedText, context);
 
-        // 맥락 예외 검사 (오탐 방지)
-        let contextException: PatternMatch['contextException'] | undefined;
+        // ✅ 수정: 맥락 예외 검사 - 감지 시 완전 필터링!
         if (enableContextExceptionFilter) {
           const exceptionCheck = this.checkContextExceptions(
             text,
@@ -301,13 +305,9 @@ export class PatternMatcher {
             contextExceptionRange
           );
           if (exceptionCheck) {
-            contextException = {
-              type: exceptionCheck.type,
-              description: exceptionCheck.description,
-              isFiltered: true,
-            };
-            // 맥락 예외 감지 시 신뢰도 대폭 감소
-            confidence = confidence * 0.3;
+            // ✅ 맥락 예외 감지 시 완전히 건너뜀 (continue)
+            // 부정문, 면책조항 등이 있으면 위반으로 보지 않음
+            continue;
           }
         }
 
@@ -338,15 +338,9 @@ export class PatternMatcher {
           legalBasis: pattern.legalBasis,
           description: pattern.description,
           suggestion: pattern.suggestion,
-          contextException,
           sentenceId,
         });
       }
-    }
-
-    // 맥락 예외로 필터된 항목 제거 (옵션에 따라)
-    if (enableContextExceptionFilter) {
-      matches = matches.filter(m => !m.contextException?.isFiltered);
     }
 
     // 문장 내 중복 제거
@@ -409,6 +403,7 @@ export class PatternMatcher {
 
   /**
    * 신뢰도 계산
+   * ✅ 개선: 맥락 키워드 기반 가중치 추가
    */
   private calculateConfidence(
     pattern: PatternDefinition,
@@ -425,8 +420,26 @@ export class PatternMatcher {
     if (matchedText.length > 10) confidence += 0.05;
     if (matchedText.length > 20) confidence += 0.05;
 
-    // 최대 0.95로 제한
-    return Math.min(0.95, confidence);
+    // ✅ 추가: 위반 강화 키워드 (더 확실한 위반)
+    const boostKeywords = ['보장', '확실', '무조건', '반드시', '약속', '보증'];
+    for (const keyword of boostKeywords) {
+      if (context.includes(keyword)) {
+        confidence += 0.05;
+        break; // 중복 가산 방지
+      }
+    }
+
+    // ✅ 추가: 위반 약화 키워드 (위반 가능성 낮음)
+    const reduceKeywords = ['수 있습니다', '수도 있', '개인차', '개인에 따라', '노력'];
+    for (const keyword of reduceKeywords) {
+      if (context.includes(keyword)) {
+        confidence -= 0.1;
+        break;
+      }
+    }
+
+    // 최대 0.95, 최소 0.5로 제한
+    return Math.max(0.5, Math.min(0.95, confidence));
   }
 
   /**

@@ -1,6 +1,12 @@
 /**
  * 규칙 엔진
- * 패턴 매칭 결과를 분석하여 위반 판정 및 점수/등급 계산
+ * 패턴 매칭 결과를 분석하여 위반 판정 및 청정지수/등급 계산
+ * 
+ * v2.1 수정사항:
+ * - 점수 체계 역전: 100점 = 좋음 (청정지수)
+ * - 날씨 이모지 + 직관적 상태 표현
+ * - 신뢰도를 점수 계산에 반영
+ * - 부드럽고 간결한 안내 문구
  */
 
 import type { PatternMatch } from './pattern-matcher';
@@ -13,38 +19,114 @@ import type { ViolationResult, ViolationType, ViolationSeverity } from '../../ty
 /**
  * 분석 등급
  */
-export type AnalysisGrade = 'A' | 'B' | 'C' | 'D' | 'F';
+export type AnalysisGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
 
 /**
- * 등급별 설명
+ * 등급 정보
  */
-export const GRADE_DESCRIPTIONS: Record<AnalysisGrade, string> = {
-  A: '우수 - 위반 사항 없음',
-  B: '양호 - 경미한 위반 존재',
-  C: '주의 - 개선 필요',
-  D: '위험 - 즉시 수정 필요',
-  F: '심각 - 법적 조치 가능',
+export interface GradeInfo {
+  emoji: string;
+  status: string;
+  message: string;
+}
+
+/**
+ * 등급별 정보 (날씨 이모지 + 직관적 표현)
+ */
+export const GRADE_INFO: Record<AnalysisGrade, GradeInfo> = {
+  S: {
+    emoji: '☀️',
+    status: '쾌적',
+    message: '완벽해요! 규정을 잘 준수했어요',
+  },
+  A: {
+    emoji: '🌤️',
+    status: '화창',
+    message: '아주 좋아요. 사소한 부분만 확인해보세요',
+  },
+  B: {
+    emoji: '⛅',
+    status: '맑음',
+    message: '양호해요. 몇 가지만 다듬으면 더 좋아질 거예요',
+  },
+  C: {
+    emoji: '🌥️',
+    status: '흐림',
+    message: '괜찮아요. 표시된 부분을 검토해주세요',
+  },
+  D: {
+    emoji: '🌧️',
+    status: '주의',
+    message: '수정이 필요한 부분이 있어요',
+  },
+  F: {
+    emoji: '⛈️',
+    status: '경고',
+    message: '전체적인 검토를 권장드려요',
+  },
 };
 
 /**
- * 점수 계산 결과
+ * 개별 항목 표시 (신뢰도 기반)
+ */
+export interface ItemLabel {
+  emoji: string;
+  label: string;
+  message: string;
+}
+
+export const CONFIDENCE_LABELS: Record<'high' | 'medium' | 'low', ItemLabel> = {
+  high: {
+    emoji: '🌧️',
+    label: '수정 권장',
+    message: '이 표현은 수정해주시면 좋겠어요',
+  },
+  medium: {
+    emoji: '🌦️',
+    label: '검토 필요',
+    message: '이 표현을 확인해주세요',
+  },
+  low: {
+    emoji: '☁️',
+    label: '참고',
+    message: '맥락에 따라 주의가 필요할 수 있어요',
+  },
+};
+
+// 이전 버전 호환성을 위한 GRADE_DESCRIPTIONS
+export const GRADE_DESCRIPTIONS: Record<AnalysisGrade, string> = {
+  S: '☀️ 쾌적 - 완벽해요!',
+  A: '🌤️ 화창 - 아주 좋아요',
+  B: '⛅ 맑음 - 양호해요',
+  C: '🌥️ 흐림 - 괜찮아요',
+  D: '🌧️ 주의 - 수정이 필요해요',
+  F: '⛈️ 경고 - 검토가 필요해요',
+};
+
+/**
+ * 청정지수 결과
  */
 export interface ScoreResult {
-  /** 총점 (0-100, 높을수록 위반 심각) */
-  totalScore: number;
-  /** 심각도별 점수 */
-  severityScores: {
+  /** 청정지수 (0-100, 높을수록 좋음) */
+  cleanScore: number;
+  /** 감점 합계 */
+  totalDeduction: number;
+  /** 심각도별 감점 */
+  severityDeductions: {
     critical: number;
     major: number;
     minor: number;
   };
-  /** 카테고리별 점수 */
-  categoryScores: Record<string, number>;
+  /** 카테고리별 감점 */
+  categoryDeductions: Record<string, number>;
   /** 최종 등급 */
   grade: AnalysisGrade;
-  /** 등급 설명 */
+  /** 등급 정보 */
+  gradeInfo: GradeInfo;
+  
+  // 이전 버전 호환성
+  totalScore: number;
   gradeDescription: string;
-  /** 준수율 (100 - totalScore) */
   complianceRate: number;
 }
 
@@ -65,23 +147,23 @@ export interface ViolationJudgment {
 }
 
 // ============================================
-// 점수 가중치 설정
+// 감점 가중치 설정
 // ============================================
 
-const SEVERITY_WEIGHTS = {
-  critical: 30,  // critical 위반 1건당 30점
-  major: 15,     // major 위반 1건당 15점
-  minor: 5,      // minor 위반 1건당 5점
+const SEVERITY_DEDUCTIONS = {
+  critical: 25,
+  major: 12,
+  minor: 5,
 };
 
 const CATEGORY_WEIGHTS: Record<string, number> = {
-  '치료효과보장': 1.5,    // 치료효과 보장은 가중치 높음
-  '부작용부정': 1.5,      // 부작용 부정도 가중치 높음
-  '최상급표현': 1.2,
-  '비교광고': 1.3,
-  '환자유인': 1.4,
-  '전후사진': 1.2,
-  '체험기': 1.1,
+  '치료효과보장': 1.3,
+  '부작용부정': 1.3,
+  '최상급표현': 1.1,
+  '비교광고': 1.2,
+  '환자유인': 1.2,
+  '전후사진': 1.1,
+  '체험기': 1.0,
   '금지어': 1.0,
 };
 
@@ -94,16 +176,9 @@ export class RuleEngine {
    * 패턴 매칭 결과를 위반 판정으로 변환
    */
   judge(matches: PatternMatch[]): ViolationJudgment {
-    // 위반 결과 생성
     const violations = this.convertToViolations(matches);
-
-    // 점수 계산
     const score = this.calculateScore(matches);
-
-    // 요약 생성
     const summary = this.generateSummary(violations, score);
-
-    // 권장 조치 생성
     const recommendations = this.generateRecommendations(violations, score);
 
     return {
@@ -135,7 +210,18 @@ export class RuleEngine {
       ],
       confidence: match.confidence,
       patternId: match.patternId,
+      itemLabel: this.getItemLabel(match.confidence),
+      suggestion: match.suggestion,
     }));
+  }
+
+  /**
+   * 신뢰도에 따른 라벨 반환
+   */
+  private getItemLabel(confidence: number): ItemLabel {
+    if (confidence >= 0.85) return CONFIDENCE_LABELS.high;
+    if (confidence >= 0.70) return CONFIDENCE_LABELS.medium;
+    return CONFIDENCE_LABELS.low;
   }
 
   /**
@@ -174,55 +260,58 @@ export class RuleEngine {
   }
 
   /**
-   * 점수 계산
+   * 청정지수 계산 (신뢰도 반영)
    */
   private calculateScore(matches: PatternMatch[]): ScoreResult {
-    const severityScores = { critical: 0, major: 0, minor: 0 };
-    const categoryScores: Record<string, number> = {};
+    const severityDeductions = { critical: 0, major: 0, minor: 0 };
+    const categoryDeductions: Record<string, number> = {};
 
-    let totalScore = 0;
+    let totalDeduction = 0;
 
     for (const match of matches) {
-      // 심각도별 점수
-      const baseScore = SEVERITY_WEIGHTS[match.severity];
+      const baseDeduction = SEVERITY_DEDUCTIONS[match.severity];
       const categoryWeight = CATEGORY_WEIGHTS[match.category] || 1.0;
-      const weightedScore = baseScore * categoryWeight;
+      const confidenceMultiplier = match.confidence;
+      const weightedDeduction = baseDeduction * categoryWeight * confidenceMultiplier;
 
-      severityScores[match.severity] += baseScore;
+      severityDeductions[match.severity] += Math.round(baseDeduction * confidenceMultiplier);
 
-      // 카테고리별 점수
-      if (!categoryScores[match.category]) {
-        categoryScores[match.category] = 0;
+      if (!categoryDeductions[match.category]) {
+        categoryDeductions[match.category] = 0;
       }
-      categoryScores[match.category] += weightedScore;
+      categoryDeductions[match.category] += Math.round(weightedDeduction);
 
-      totalScore += weightedScore;
+      totalDeduction += weightedDeduction;
     }
 
-    // 점수 정규화 (최대 100)
-    totalScore = Math.min(100, Math.round(totalScore));
-
-    // 등급 결정
-    const grade = this.calculateGrade(totalScore);
+    totalDeduction = Math.min(100, Math.round(totalDeduction));
+    const cleanScore = Math.max(0, 100 - totalDeduction);
+    const grade = this.calculateGrade(cleanScore);
+    const gradeInfo = GRADE_INFO[grade];
 
     return {
-      totalScore,
-      severityScores,
-      categoryScores,
+      cleanScore,
+      totalDeduction,
+      severityDeductions,
+      categoryDeductions,
       grade,
+      gradeInfo,
+      // 이전 버전 호환성
+      totalScore: cleanScore,
       gradeDescription: GRADE_DESCRIPTIONS[grade],
-      complianceRate: 100 - totalScore,
+      complianceRate: cleanScore,
     };
   }
 
   /**
    * 등급 계산
    */
-  private calculateGrade(score: number): AnalysisGrade {
-    if (score === 0) return 'A';
-    if (score <= 10) return 'B';
-    if (score <= 30) return 'C';
-    if (score <= 60) return 'D';
+  private calculateGrade(cleanScore: number): AnalysisGrade {
+    if (cleanScore === 100) return 'S';
+    if (cleanScore >= 90) return 'A';
+    if (cleanScore >= 70) return 'B';
+    if (cleanScore >= 50) return 'C';
+    if (cleanScore >= 30) return 'D';
     return 'F';
   }
 
@@ -230,22 +319,13 @@ export class RuleEngine {
    * 요약 생성
    */
   private generateSummary(violations: ViolationResult[], score: ScoreResult): string {
+    const { gradeInfo, cleanScore } = score;
+
     if (violations.length === 0) {
-      return '위반 사항이 발견되지 않았습니다. 광고 내용이 의료법을 준수하고 있습니다.';
+      return `${gradeInfo.emoji} ${gradeInfo.status} (${cleanScore}점) - ${gradeInfo.message}`;
     }
 
-    const highCount = violations.filter(v => v.severity === 'high').length;
-    const mediumCount = violations.filter(v => v.severity === 'medium').length;
-    const lowCount = violations.filter(v => v.severity === 'low').length;
-
-    const parts: string[] = [];
-    if (highCount > 0) parts.push(`심각 ${highCount}건`);
-    if (mediumCount > 0) parts.push(`주요 ${mediumCount}건`);
-    if (lowCount > 0) parts.push(`경미 ${lowCount}건`);
-
-    return `총 ${violations.length}건의 위반 발견 (${parts.join(', ')}). ` +
-      `등급: ${score.grade} (${score.gradeDescription}), ` +
-      `준수율: ${score.complianceRate}%`;
+    return `${gradeInfo.emoji} ${gradeInfo.status} (${cleanScore}점) - 확인이 필요한 표현 ${violations.length}건`;
   }
 
   /**
@@ -258,58 +338,44 @@ export class RuleEngine {
     const recommendations: string[] = [];
 
     if (violations.length === 0) {
-      recommendations.push('현재 광고 내용을 유지하세요.');
+      recommendations.push('현재 광고 내용을 유지해주세요.');
       return recommendations;
     }
 
-    // 심각도별 권장 조치
-    const highViolations = violations.filter(v => v.severity === 'high');
-    const mediumViolations = violations.filter(v => v.severity === 'medium');
+    // 심각도별 개수
+    const highCount = violations.filter(v => v.severity === 'high').length;
+    const mediumCount = violations.filter(v => v.severity === 'medium').length;
+    const lowCount = violations.filter(v => v.severity === 'low').length;
 
-    if (highViolations.length > 0) {
-      recommendations.push(
-        `즉시 수정 필요: ${highViolations.length}건의 심각한 위반이 있습니다. ` +
-        '법적 조치를 받을 수 있으므로 해당 내용을 즉시 삭제하거나 수정하세요.'
-      );
+    if (highCount > 0) {
+      recommendations.push(`🌧️ 수정 권장 ${highCount}건: 심의에서 지적받을 수 있어요`);
     }
 
-    if (mediumViolations.length > 0) {
-      recommendations.push(
-        `주요 수정 권장: ${mediumViolations.length}건의 주요 위반이 있습니다. ` +
-        '광고 심의 과정에서 문제가 될 수 있습니다.'
-      );
+    if (mediumCount > 0) {
+      recommendations.push(`🌦️ 검토 필요 ${mediumCount}건: 확인해보시면 좋겠어요`);
     }
 
-    // 등급별 추가 권장 조치
-    if (score.grade === 'F') {
-      recommendations.push(
-        '광고 전면 재검토를 권장합니다. 현재 상태로 게시 시 행정 처분 대상이 될 수 있습니다.'
-      );
-    } else if (score.grade === 'D') {
-      recommendations.push(
-        '광고 내용의 상당 부분 수정이 필요합니다. 전문가 검토를 받아보세요.'
-      );
+    if (lowCount > 0) {
+      recommendations.push(`☁️ 참고 ${lowCount}건: 맥락에 따라 검토해주세요`);
     }
 
-    // 카테고리별 구체적 권장
+    // 카테고리별 구체적 안내
     const categories = [...new Set(violations.map(v => v.type))];
 
     if (categories.includes('guarantee')) {
-      recommendations.push(
-        '"완치", "100%" 등 치료 효과를 보장하는 표현을 삭제하세요.'
-      );
+      recommendations.push('💡 효과 보장 표현은 "개인에 따라 다를 수 있습니다" 문구를 추가해보세요');
     }
 
     if (categories.includes('exaggeration')) {
-      recommendations.push(
-        '"최고", "최상", "유일" 등 과장 표현을 객관적 사실로 대체하세요.'
-      );
+      recommendations.push('💡 "최고", "최상" 등은 객관적 표현으로 변경해보세요');
+    }
+
+    if (categories.includes('false_claim')) {
+      recommendations.push('💡 부작용 관련 표현은 "최소화" 등으로 완화해보세요');
     }
 
     if (categories.includes('before_after')) {
-      recommendations.push(
-        '전후 비교 사진 사용 시 반드시 법적 요건을 확인하세요.'
-      );
+      recommendations.push('💡 전후 사진 사용 시 법적 요건을 확인해주세요');
     }
 
     return recommendations;

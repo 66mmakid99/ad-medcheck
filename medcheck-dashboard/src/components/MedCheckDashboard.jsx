@@ -526,7 +526,7 @@ function AnalyzeTab({ apiBase }) {
               {result.grade}등급
             </span>
           </div>
-          
+
           <div className="grid grid-cols-3 gap-3 mb-4">
             <StatCard title="위반 항목" value={result.violationCount} color={result.violationCount > 0 ? 'red' : 'emerald'} />
             <StatCard title="Critical" value={result.bySeverity?.critical || 0} color="red" />
@@ -539,15 +539,14 @@ function AnalyzeTab({ apiBase }) {
               {result.violations.map((v, i) => (
                 <div key={i} className="bg-slate-700/30 rounded-lg p-3 text-sm">
                   <div className="flex items-start gap-2">
-                    <span className={`px-1.5 py-0.5 text-xs rounded ${
-                      v.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
-                      v.severity === 'major' ? 'bg-orange-500/20 text-orange-400' :
-                      'bg-yellow-500/20 text-yellow-400'
-                    }`}>{v.severity}</span>
+                    <span className={`px-1.5 py-0.5 text-xs rounded ${v.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
+                        v.severity === 'major' ? 'bg-orange-500/20 text-orange-400' :
+                          'bg-yellow-500/20 text-yellow-400'
+                      }`}>{v.severity}</span>
                     <div>
                       <p className="font-medium">{v.description}</p>
                       <p className="text-slate-400 text-xs mt-1">발견: "{v.matched}"</p>
-                      {v.legalBasis && <p className="text-slate-500 text-xs mt-1">근거: {v.legalBasis}</p>}
+                      {v.legalBasis && <p className="text-slate-500 text-xs mt-1">근거: {Array.isArray(v.legalBasis) ? v.legalBasis[0]?.article : v.legalBasis}</p>}
                     </div>
                   </div>
                 </div>
@@ -683,8 +682,8 @@ function AdCheckTab({ apiBase }) {
                       <p className="font-medium">{h.hospital_name || h.name}</p>
                       <p className="text-xs text-slate-400">{h.sido} {h.sigungu}</p>
                       {h.homepage && (
-                        <a href={h.homepage} target="_blank" rel="noopener noreferrer" 
-                           className="text-xs text-blue-400 hover:underline" onClick={(e) => e.stopPropagation()}>
+                        <a href={h.homepage} target="_blank" rel="noopener noreferrer"
+                          className="text-xs text-blue-400 hover:underline" onClick={(e) => e.stopPropagation()}>
                           {h.homepage.slice(0, 30)}...
                         </a>
                       )}
@@ -717,7 +716,7 @@ function AdCheckTab({ apiBase }) {
                 <p className="text-sm text-slate-400">{hospitalDetail.sido} {hospitalDetail.sigungu}</p>
                 {hospitalDetail.homepage && (
                   <a href={hospitalDetail.homepage} target="_blank" rel="noopener noreferrer"
-                     className="text-sm text-blue-400 hover:underline">
+                    className="text-sm text-blue-400 hover:underline">
                     {hospitalDetail.homepage}
                   </a>
                 )}
@@ -754,11 +753,10 @@ function AdCheckTab({ apiBase }) {
                   hospitalDetail.violations.map((v, i) => (
                     <div key={i} className="bg-slate-700/30 rounded-lg p-3 text-sm">
                       <div className="flex items-start gap-2">
-                        <span className={`px-1.5 py-0.5 text-xs rounded whitespace-nowrap ${
-                          v.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
-                          v.severity === 'major' ? 'bg-orange-500/20 text-orange-400' :
-                          'bg-yellow-500/20 text-yellow-400'
-                        }`}>{v.severity}</span>
+                        <span className={`px-1.5 py-0.5 text-xs rounded whitespace-nowrap ${v.severity === 'critical' ? 'bg-red-500/20 text-red-400' :
+                            v.severity === 'major' ? 'bg-orange-500/20 text-orange-400' :
+                              'bg-yellow-500/20 text-yellow-400'
+                          }`}>{v.severity}</span>
                         <div className="flex-1">
                           <p className="font-medium">{v.description || v.pattern_description}</p>
                           {v.matched && <p className="text-slate-400 text-xs mt-1">발견: "{v.matched}"</p>}

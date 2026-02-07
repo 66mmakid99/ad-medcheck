@@ -3,6 +3,10 @@ node_modules/
 .env.local
 .env.*.local
 
+# 크롤링 출력물
+medcheck-scv/output/
+medcheck-scv/data/checkpoints/
+
 # Windows temp files (잘못된 명령어 실행 잔여물)
 ren
 taskkill

@@ -1,15 +1,19 @@
 /**
  * OCR 파이프라인 라우트
  * 2단계 파이프라인: Gemini Flash OCR → 패턴 매칭 (156개 패턴)
+ * 3단계 파이프라인 (hybrid): Gemini OCR → 정규식 → Gemini LLM 검증
  *
- * POST /analyze - 이미지 OCR + 패턴 매칭 분석
- * GET  /results - OCR 분석 결과 목록
- * GET  /results/:id - OCR 분석 결과 상세
+ * POST /analyze        - 이미지 OCR + 패턴 매칭 분석 (regex only)
+ * POST /analyze-hybrid - 이미지 OCR + 패턴 매칭 + AI 검증 (hybrid)
+ * GET  /results        - OCR 분석 결과 목록
+ * GET  /results/:id    - OCR 분석 결과 상세
  */
 
 import { Hono } from 'hono';
 import { callGeminiVision, OCR_ONLY_PROMPT } from '../../services/gemini-ocr';
 import { violationDetector } from '../../modules/violation-detector';
+import { verifyViolationsWithAI } from '../../services/hybrid-analyzer';
+import type { ViolationItem } from '../../services/hybrid-analyzer';
 import type { D1Database } from '../../db/d1';
 
 // ============================================
@@ -106,15 +110,15 @@ ocrPipelineRoutes.post('/analyze', async (c) => {
     const resultId = generateId();
     const processingTimeMs = Date.now() - startTime;
 
-    // 4. D1에 결과 저장
+    // 4. D1에 결과 저장 (analysis_mode = 'regex')
     try {
       await c.env.DB.prepare(`
         INSERT INTO ocr_results (
           id, image_url, extracted_text, ocr_confidence, gemini_model,
           violation_count, violations_json, score_json, grade, total_score,
           compound_violations_json, department_violations_json, options_json,
-          processing_time_ms, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+          analysis_mode, processing_time_ms, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
       `).bind(
         resultId,
         imageUrl || 'base64',
@@ -129,6 +133,7 @@ ocrPipelineRoutes.post('/analyze', async (c) => {
         detectionResult.compoundViolations ? JSON.stringify(detectionResult.compoundViolations) : null,
         detectionResult.departmentViolations ? JSON.stringify(detectionResult.departmentViolations) : null,
         options ? JSON.stringify(options) : null,
+        'regex',
         processingTimeMs
       ).run();
     } catch (dbError) {
@@ -149,6 +154,7 @@ ocrPipelineRoutes.post('/analyze', async (c) => {
         grade: detectionResult.judgment.score.grade,
         compoundViolations: detectionResult.compoundViolations,
         departmentViolations: detectionResult.departmentViolations,
+        analysisMode: 'regex',
         processingTimeMs,
       }
     });
@@ -159,6 +165,168 @@ ocrPipelineRoutes.post('/analyze', async (c) => {
       success: false,
       error: {
         code: 'OCR_PIPELINE_ERROR',
+        message: error instanceof Error ? error.message : String(error)
+      }
+    }, 500);
+  }
+});
+
+/**
+ * POST /api/ocr/analyze-hybrid - OCR + 패턴 매칭 + AI 검증 하이브리드 파이프라인
+ *
+ * 3단계: Gemini OCR → 1차 정규식 필터 → 2차 Gemini LLM 검증 → 최종 결과
+ * - confirmed (aiConfidence >= 70): 정탐 확정
+ * - falsePositiveCandidate (aiConfidence < 70): 오탐 후보
+ */
+ocrPipelineRoutes.post('/analyze-hybrid', async (c) => {
+  const startTime = Date.now();
+
+  try {
+    const body = await c.req.json() as OcrPipelineRequest;
+    const { imageUrl, imageBase64, options } = body;
+
+    // 1. 입력 검증
+    if (!imageUrl && !imageBase64) {
+      return c.json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'imageUrl 또는 imageBase64가 필요합니다' }
+      }, 400);
+    }
+
+    const apiKey = c.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return c.json({
+        success: false,
+        error: { code: 'CONFIG_ERROR', message: 'Gemini API 키가 설정되지 않았습니다' }
+      }, 500);
+    }
+
+    // 2. Gemini Vision OCR - 텍스트만 추출
+    const ocrResult = await callGeminiVision(
+      apiKey,
+      { url: imageUrl, base64: imageBase64 },
+      OCR_ONLY_PROMPT
+    );
+
+    const extractedText = ocrResult.text.trim();
+
+    if (!extractedText) {
+      return c.json({
+        success: true,
+        data: {
+          id: generateId(),
+          imageUrl: imageUrl || 'base64',
+          extractedText: '',
+          ocrConfidence: ocrResult.confidence,
+          violationCount: 0,
+          violations: [],
+          score: { totalScore: 0, grade: 'A', gradeDescription: '위반 없음', complianceRate: 100, details: [] },
+          grade: 'A',
+          analysisMode: 'hybrid',
+          hybridAnalysis: {
+            totalPatternMatches: 0,
+            confirmedCount: 0,
+            falsePositiveCandidateCount: 0,
+            verifications: [],
+            falsePositiveCandidates: [],
+            aiProcessingTimeMs: 0,
+          },
+          processingTimeMs: Date.now() - startTime,
+        }
+      });
+    }
+
+    // 3. 1차 패턴 매칭 분석 (기존 156개 패턴 + 규칙엔진)
+    const detectionResult = violationDetector.analyze({
+      text: extractedText,
+      options: {
+        categories: options?.categories,
+        minSeverity: options?.minSeverity,
+      },
+      enableCompoundDetection: options?.enableCompoundDetection ?? true,
+      enableDepartmentRules: options?.enableDepartmentRules ?? true,
+      department: options?.department as any,
+    });
+
+    const patternViolations = detectionResult.judgment.violations as ViolationItem[];
+
+    // 4. 2차 AI 검증
+    const hybridResult = await verifyViolationsWithAI(
+      apiKey,
+      extractedText,
+      patternViolations
+    );
+
+    const resultId = generateId();
+    const processingTimeMs = Date.now() - startTime;
+
+    // 5. D1에 결과 저장 (analysis_mode = 'hybrid')
+    try {
+      await c.env.DB.prepare(`
+        INSERT INTO ocr_results (
+          id, image_url, extracted_text, ocr_confidence, gemini_model,
+          violation_count, violations_json, score_json, grade, total_score,
+          compound_violations_json, department_violations_json, options_json,
+          analysis_mode, hybrid_verifications_json, false_positive_candidates_json,
+          ai_processing_time_ms, processing_time_ms, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
+      `).bind(
+        resultId,
+        imageUrl || 'base64',
+        extractedText.slice(0, 10000),
+        ocrResult.confidence,
+        'gemini-2.0-flash',
+        hybridResult.confirmedViolations.length,
+        JSON.stringify(hybridResult.confirmedViolations),
+        JSON.stringify(detectionResult.judgment.score),
+        detectionResult.judgment.score.grade,
+        detectionResult.judgment.score.totalScore,
+        detectionResult.compoundViolations ? JSON.stringify(detectionResult.compoundViolations) : null,
+        detectionResult.departmentViolations ? JSON.stringify(detectionResult.departmentViolations) : null,
+        options ? JSON.stringify(options) : null,
+        'hybrid',
+        JSON.stringify(hybridResult.verifications),
+        JSON.stringify(hybridResult.falsePositiveCandidates),
+        hybridResult.aiProcessingTimeMs,
+        processingTimeMs
+      ).run();
+    } catch (dbError) {
+      console.warn('[OCR Pipeline] Hybrid DB 저장 실패:', dbError);
+    }
+
+    // 6. 응답 반환
+    return c.json({
+      success: true,
+      data: {
+        id: resultId,
+        imageUrl: imageUrl || 'base64',
+        extractedText,
+        ocrConfidence: ocrResult.confidence,
+        violationCount: hybridResult.confirmedViolations.length,
+        violations: hybridResult.confirmedViolations,
+        score: detectionResult.judgment.score,
+        grade: detectionResult.judgment.score.grade,
+        compoundViolations: detectionResult.compoundViolations,
+        departmentViolations: detectionResult.departmentViolations,
+        analysisMode: 'hybrid',
+        hybridAnalysis: {
+          totalPatternMatches: patternViolations.length,
+          confirmedCount: hybridResult.confirmedViolations.length,
+          falsePositiveCandidateCount: hybridResult.falsePositiveCandidates.length,
+          verifications: hybridResult.verifications,
+          falsePositiveCandidates: hybridResult.falsePositiveCandidates,
+          aiProcessingTimeMs: hybridResult.aiProcessingTimeMs,
+        },
+        processingTimeMs,
+      }
+    });
+
+  } catch (error: unknown) {
+    console.error('[OCR Pipeline] Hybrid 분석 오류:', error);
+    return c.json({
+      success: false,
+      error: {
+        code: 'HYBRID_PIPELINE_ERROR',
         message: error instanceof Error ? error.message : String(error)
       }
     }, 500);
@@ -261,6 +429,12 @@ ocrPipelineRoutes.get('/results/:id', async (c) => {
     if (data.options_json) {
       try { data.options = JSON.parse(data.options_json); } catch { data.options = null; }
     }
+    if (data.hybrid_verifications_json) {
+      try { data.hybridVerifications = JSON.parse(data.hybrid_verifications_json); } catch { data.hybridVerifications = []; }
+    }
+    if (data.false_positive_candidates_json) {
+      try { data.falsePositiveCandidates = JSON.parse(data.false_positive_candidates_json); } catch { data.falsePositiveCandidates = []; }
+    }
 
     // raw JSON 필드 제거
     delete data.violations_json;
@@ -268,6 +442,8 @@ ocrPipelineRoutes.get('/results/:id', async (c) => {
     delete data.compound_violations_json;
     delete data.department_violations_json;
     delete data.options_json;
+    delete data.hybrid_verifications_json;
+    delete data.false_positive_candidates_json;
 
     return c.json({
       success: true,

@@ -342,13 +342,30 @@ analyzeRoutes.post('-url', async (c) => {
   try {
     const startTime = Date.now();
 
-    // 1. URL에서 HTML 가져오기
-    const htmlResponse = await fetch(body.url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; MedCheck-Analyzer/1.0)',
-        'Accept': 'text/html',
-      },
-    });
+    // 1. URL에서 HTML 가져오기 (30초 타임아웃)
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    let htmlResponse: Response;
+    try {
+      htmlResponse = await fetch(body.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; MedCheck-Analyzer/1.0)',
+          'Accept': 'text/html',
+        },
+        signal: controller.signal,
+      });
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      const msg = fetchError instanceof Error && fetchError.name === 'AbortError'
+        ? 'URL 접근 타임아웃 (30초 초과)'
+        : `URL 접근 실패: ${(fetchError as Error).message}`;
+      return c.json({
+        success: false,
+        error: { code: 'FETCH_ERROR', message: msg },
+      }, 400);
+    }
+    clearTimeout(timeoutId);
 
     if (!htmlResponse.ok) {
       return c.json({
@@ -782,13 +799,27 @@ analyzeRoutes.post('/url-with-images', async (c) => {
       totalProcessingTimeMs: 0,
     };
 
-    // 1. URL에서 HTML 가져오기
-    const htmlResponse = await fetch(body.url, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; MedCheck-Analyzer/1.0)',
-        'Accept': 'text/html',
-      },
-    });
+    // 1. URL에서 HTML 가져오기 (30초 타임아웃)
+    const urlController = new AbortController();
+    const urlTimeoutId = setTimeout(() => urlController.abort(), 30000);
+
+    let htmlResponse: Response;
+    try {
+      htmlResponse = await fetch(body.url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; MedCheck-Analyzer/1.0)',
+          'Accept': 'text/html',
+        },
+        signal: urlController.signal,
+      });
+    } catch (fetchError) {
+      clearTimeout(urlTimeoutId);
+      const msg = fetchError instanceof Error && fetchError.name === 'AbortError'
+        ? 'URL 접근 타임아웃 (30초 초과)'
+        : `URL 접근 실패: ${(fetchError as Error).message}`;
+      throw new Error(msg);
+    }
+    clearTimeout(urlTimeoutId);
 
     if (!htmlResponse.ok) {
       throw new Error(`URL 접근 실패: ${htmlResponse.status} ${htmlResponse.statusText}`);

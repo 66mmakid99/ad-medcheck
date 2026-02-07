@@ -2371,19 +2371,21 @@ function CrawlerTab({ apiBase }) {
   const [logs, setLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [triggerRegion, setTriggerRegion] = useState('서울');
+  const [triggerAi, setTriggerAi] = useState(false);
   const [triggering, setTriggering] = useState(false);
   const [triggerResult, setTriggerResult] = useState(null);
   const [stopping, setStopping] = useState(false);
   const [runningJobs, setRunningJobs] = useState([]);
   const [cancellingJob, setCancellingJob] = useState(null);
+  const [expandedLog, setExpandedLog] = useState(null);
+  const [now, setNow] = useState(Date.now());
+  const [lastRefresh, setLastRefresh] = useState(null);
 
-  const loadRunningJobs = async () => {
-    try {
-      const res = await fetch(`${apiBase}/api/crawler/jobs/running`);
-      const d = await res.json();
-      if (d.success) setRunningJobs(d.data || []);
-    } catch (e) { /* ignore */ }
-  };
+  // 1초 타이머 (실행 중인 작업 경과시간 표시용)
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   const loadStatus = async () => {
     try {
@@ -2395,22 +2397,37 @@ function CrawlerTab({ apiBase }) {
 
   const loadLogs = async () => {
     try {
-      const res = await fetch(`${apiBase}/api/crawler/logs?limit=20`);
+      const res = await fetch(`${apiBase}/api/crawler/logs?limit=30`);
       const d = await res.json();
       if (d.success) setLogs(d.data || []);
     } catch (e) { /* ignore */ }
   };
 
+  const loadRunningJobs = async () => {
+    try {
+      const res = await fetch(`${apiBase}/api/crawler/jobs/running`);
+      const d = await res.json();
+      if (d.success) setRunningJobs(d.data || []);
+    } catch (e) { /* ignore */ }
+  };
+
+  const loadAll = async () => {
+    await Promise.all([loadStatus(), loadLogs(), loadRunningJobs()]);
+    setLastRefresh(new Date());
+  };
+
+  // 적응형 폴링: 실행 중 작업이 있으면 5초, 없으면 15초
+  const hasRunning = runningJobs.length > 0;
   useEffect(() => {
-    const load = async () => {
+    const init = async () => {
       setLoading(true);
-      await Promise.all([loadStatus(), loadLogs(), loadRunningJobs()]);
+      await loadAll();
       setLoading(false);
     };
-    load();
-    const interval = setInterval(() => { loadStatus(); loadLogs(); loadRunningJobs(); }, 15000);
+    init();
+    const interval = setInterval(loadAll, hasRunning ? 5000 : 15000);
     return () => clearInterval(interval);
-  }, []);
+  }, [hasRunning]);
 
   const handleTrigger = async () => {
     setTriggering(true);
@@ -2419,12 +2436,12 @@ function CrawlerTab({ apiBase }) {
       const res = await fetch(`${apiBase}/api/crawler/trigger`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ region: triggerRegion }),
+        body: JSON.stringify({ region: triggerRegion, enableAi: triggerAi }),
       });
       const d = await res.json();
       if (d.success) {
-        setTriggerResult({ type: 'success', message: `크롤링 트리거 등록 완료 (${d.data.id})` });
-        setTimeout(() => { loadStatus(); loadLogs(); }, 2000);
+        setTriggerResult({ type: 'success', message: `크롤링 트리거 등록 완료 (ID: ${d.data.id})` });
+        setTimeout(loadAll, 2000);
       } else {
         setTriggerResult({ type: 'error', message: d.error || '트리거 실패' });
       }
@@ -2435,7 +2452,7 @@ function CrawlerTab({ apiBase }) {
   };
 
   const handleShutdown = async () => {
-    if (!confirm('스케줄러를 종료하시겠습니까?')) return;
+    if (!confirm('스케줄러를 종료하시겠습니까?\n실행 중인 작업이 있으면 완료 후 종료됩니다.')) return;
     setStopping(true);
     try {
       const res = await fetch(`${apiBase}/api/crawler/shutdown`, {
@@ -2445,7 +2462,7 @@ function CrawlerTab({ apiBase }) {
       const d = await res.json();
       if (d.success) {
         setTriggerResult({ type: 'success', message: '종료 요청 전송 완료 (최대 30초 후 반영)' });
-        setTimeout(() => { loadStatus(); }, 35000);
+        setTimeout(loadAll, 5000);
       }
     } catch (e) {
       setTriggerResult({ type: 'error', message: '종료 요청 실패' });
@@ -2465,7 +2482,7 @@ function CrawlerTab({ apiBase }) {
       const d = await res.json();
       if (d.success) {
         setTriggerResult({ type: 'success', message: d.data.message });
-        setTimeout(() => { loadRunningJobs(); loadLogs(); loadStatus(); }, 3000);
+        setTimeout(loadAll, 3000);
       }
     } catch (e) {
       setTriggerResult({ type: 'error', message: '작업 중지 요청 실패' });
@@ -2473,39 +2490,58 @@ function CrawlerTab({ apiBase }) {
     setCancellingJob(null);
   };
 
+  // 경과시간 (라이브)
+  const formatElapsed = (startedAt) => {
+    if (!startedAt) return '-';
+    const elapsed = Math.max(0, Math.floor((now - new Date(startedAt).getTime()) / 1000));
+    const h = Math.floor(elapsed / 3600);
+    const m = Math.floor((elapsed % 3600) / 60);
+    const s = elapsed % 60;
+    if (h > 0) return `${h}시간 ${m}분 ${s}초`;
+    if (m > 0) return `${m}분 ${s}초`;
+    return `${s}초`;
+  };
+
   const formatDuration = (sec) => {
-    if (!sec) return '-';
+    if (!sec && sec !== 0) return '-';
     if (sec < 60) return `${sec}초`;
-    return `${Math.floor(sec / 60)}분 ${sec % 60}초`;
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return s > 0 ? `${m}분 ${s}초` : `${m}분`;
   };
 
   const formatTime = (ts) => {
     if (!ts) return '-';
     const d = new Date(ts);
-    return d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    return d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
   };
 
+  const formatTimeShort = (ts) => {
+    if (!ts) return '-';
+    const d = new Date(ts);
+    return d.toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', hour: '2-digit', minute: '2-digit' });
+  };
+
+  const statusConfig = {
+    running:          { bg: 'bg-blue-100',    text: 'text-blue-700',    label: '실행 중',  icon: '⏳' },
+    completed:        { bg: 'bg-emerald-100', text: 'text-emerald-700', label: '완료',     icon: '✅' },
+    failed:           { bg: 'bg-red-100',     text: 'text-red-700',     label: '실패',     icon: '❌' },
+    cancel_requested: { bg: 'bg-orange-100',  text: 'text-orange-700',  label: '취소 중',  icon: '🛑' },
+  };
   const statusBadge = (s) => {
-    const map = {
-      running: 'bg-blue-100 text-blue-700',
-      completed: 'bg-emerald-100 text-emerald-700',
-      failed: 'bg-red-100 text-red-700',
-      cancel_requested: 'bg-orange-100 text-orange-700',
-    };
-    const labelMap = { running: '실행 중', completed: '완료', failed: '실패', cancel_requested: '취소 중' };
-    return <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${map[s] || 'bg-slate-100 text-slate-600'}`}>{labelMap[s] || s}</span>;
+    const c = statusConfig[s] || { bg: 'bg-slate-100', text: 'text-slate-600', label: s, icon: '·' };
+    return <span className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium ${c.bg} ${c.text}`}>{c.icon} {c.label}</span>;
   };
 
-  const typeBadge = (t) => {
-    return t === 'scheduled'
-      ? <span className="px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700">예약</span>
-      : <span className="px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">수동</span>;
-  };
+  const typeBadge = (t) => t === 'scheduled'
+    ? <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-indigo-100 text-indigo-700">🕐 예약</span>
+    : <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs bg-amber-100 text-amber-700">👆 수동</span>;
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <div className="w-10 h-10 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+        <p className="text-sm text-slate-400">크롤러 상태 로딩 중...</p>
       </div>
     );
   }
@@ -2513,254 +2549,428 @@ function CrawlerTab({ apiBase }) {
   const isOnline = status?.schedulerOnline;
   const last = status?.lastCrawl;
   const today = status?.todaySummary || {};
+  const successRate = today.runs > 0 ? Math.round(((today.completed || 0) / today.runs) * 100) : 0;
+  const pending = status?.pendingTriggers || 0;
 
   return (
-    <div className="space-y-6">
-      {/* 스케줄러 ON/OFF 토글 */}
-      <div className={`rounded-2xl p-6 border shadow-sm flex items-center justify-between ${
-        isOnline
-          ? 'bg-gradient-to-r from-emerald-50 to-white border-emerald-200'
-          : 'bg-gradient-to-r from-slate-100 to-white border-slate-200'
+    <div className="space-y-5">
+      {/* ━━━ 1. 스케줄러 ON/OFF 배너 ━━━ */}
+      <div className={`rounded-2xl border shadow-sm overflow-hidden ${
+        isOnline ? 'border-emerald-200' : 'border-slate-200'
       }`}>
-        <div className="flex items-center gap-4">
-          <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${
-            isOnline ? 'bg-emerald-100' : 'bg-slate-200'
-          }`}>
-            {isOnline ? '🟢' : '⚫'}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className={`text-lg font-bold ${isOnline ? 'text-emerald-700' : 'text-slate-500'}`}>
-                스케줄러 {isOnline ? 'ON' : 'OFF'}
-              </h2>
-              {isOnline && <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />}
+        <div className={`px-6 py-5 flex items-center justify-between ${
+          isOnline
+            ? 'bg-gradient-to-r from-emerald-50 via-emerald-50/50 to-white'
+            : 'bg-gradient-to-r from-slate-100 via-slate-50 to-white'
+        }`}>
+          <div className="flex items-center gap-4">
+            <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shadow-sm ${
+              isOnline ? 'bg-emerald-100 border border-emerald-200' : 'bg-slate-200 border border-slate-300'
+            }`}>
+              {isOnline ? '🟢' : '⚫'}
             </div>
-            <p className="text-sm text-slate-500 mt-0.5">
-              {isOnline
-                ? `PID ${status?.schedulerInfo?.pid || '-'} · 다음 실행: ${formatTime(status?.schedulerInfo?.nextScheduledRun)}`
-                : '로컬 스케줄러가 실행되고 있지 않습니다'}
-            </p>
-            {status?.lastHeartbeat && (
-              <p className="text-xs text-slate-400 mt-0.5">마지막 응답: {formatTime(status.lastHeartbeat)}</p>
+            <div>
+              <div className="flex items-center gap-2.5">
+                <h2 className={`text-lg font-bold ${isOnline ? 'text-emerald-700' : 'text-slate-500'}`}>
+                  스케줄러 {isOnline ? 'ON' : 'OFF'}
+                </h2>
+                {isOnline && <div className="w-2.5 h-2.5 bg-emerald-400 rounded-full animate-pulse" />}
+              </div>
+              {isOnline ? (
+                <div className="mt-1 space-y-0.5">
+                  <p className="text-sm text-slate-600">
+                    PID <span className="font-mono font-medium">{status?.schedulerInfo?.pid || '-'}</span>
+                    <span className="mx-2 text-slate-300">|</span>
+                    실행 중 <span className="font-medium">{status?.schedulerInfo?.runningJobs || 0}</span>
+                    <span className="mx-2 text-slate-300">|</span>
+                    대기 <span className="font-medium">{status?.schedulerInfo?.queuedJobs || 0}</span>
+                  </p>
+                  <p className="text-xs text-slate-400">
+                    다음 예약: {formatTime(status?.schedulerInfo?.nextScheduledRun)}
+                    <span className="mx-2 text-slate-300">·</span>
+                    하트비트: {formatTimeShort(status?.lastHeartbeat)}
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 mt-1">로컬 스케줄러가 실행되고 있지 않습니다</p>
+              )}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            {isOnline ? (
+              <button
+                onClick={handleShutdown}
+                disabled={stopping}
+                className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-red-500 hover:bg-red-600 text-white transition-all shadow-sm disabled:opacity-50 active:scale-95"
+              >
+                {stopping ? '종료 요청 중...' : '스케줄러 끄기'}
+              </button>
+            ) : (
+              <div className="text-right">
+                <code className="text-xs text-slate-500 bg-slate-100 border border-slate-200 rounded-lg px-4 py-2 block">
+                  npm run scheduler:start
+                </code>
+                <p className="text-xs text-slate-400 mt-1.5">로컬 터미널에서 실행</p>
+              </div>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          {isOnline ? (
-            <button
-              onClick={handleShutdown}
-              disabled={stopping}
-              className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-red-500 hover:bg-red-600 text-white transition-colors shadow-sm disabled:opacity-50"
-            >
-              {stopping ? '종료 요청 중...' : '스케줄러 끄기'}
-            </button>
-          ) : (
-            <div className="text-right">
-              <div className="text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 font-mono">
-                npm run scheduler:start
-              </div>
-              <p className="text-xs text-slate-400 mt-1">로컬 터미널에서 실행</p>
-            </div>
-          )}
-        </div>
       </div>
 
+      {/* ━━━ 알림 메시지 ━━━ */}
       {triggerResult && (
-        <div className={`px-4 py-3 rounded-xl text-sm ${triggerResult.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+        <div className={`px-4 py-3 rounded-xl text-sm flex items-center gap-2 ${
+          triggerResult.type === 'success'
+            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+            : 'bg-red-50 text-red-700 border border-red-200'
+        }`}>
+          <span>{triggerResult.type === 'success' ? '✅' : '❌'}</span>
           {triggerResult.message}
+          <button onClick={() => setTriggerResult(null)} className="ml-auto text-lg opacity-50 hover:opacity-100">&times;</button>
         </div>
       )}
 
-      {/* 상태 카드 */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-          <div className="text-sm text-slate-500 mb-2">마지막 크롤링</div>
-          <div className="text-xl font-bold text-slate-700">
-            {last ? formatTime(last.started_at) : '-'}
+      {/* ━━━ 2. 오늘 통계 카드 ━━━ */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { label: '오늘 실행', value: `${today.runs || 0}회`, sub: `완료 ${today.completed || 0} · 실패 ${today.failed || 0}`, color: 'blue', icon: '🔄' },
+          { label: '분석 병원', value: `${today.totalHospitals || 0}개`, sub: '오늘 총 분석 대상', color: 'indigo', icon: '🏥' },
+          { label: '위반 탐지', value: `${today.totalViolations || 0}건`, sub: '오늘 총 위반 감지', color: 'red', icon: '⚠️' },
+          { label: '성공률', value: `${successRate}%`, sub: today.runs > 0 ? `${today.completed || 0}/${today.runs}` : '실행 없음', color: 'emerald', icon: '📊' },
+        ].map((card) => (
+          <div key={card.label} className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-medium text-slate-500 uppercase tracking-wide">{card.label}</span>
+              <span className="text-lg">{card.icon}</span>
+            </div>
+            <div className={`text-2xl font-bold text-${card.color}-600`}>{card.value}</div>
+            <div className="text-xs text-slate-400 mt-1">{card.sub}</div>
           </div>
-          {last && <div className="text-xs text-slate-400 mt-1">{last.region} / {last.type === 'scheduled' ? '예약' : '수동'}</div>}
-        </div>
-
-        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-          <div className="text-sm text-slate-500 mb-2">오늘 실행</div>
-          <div className="text-xl font-bold text-blue-600">{today.runs || 0}회</div>
-          <div className="text-xs text-slate-400 mt-1">
-            완료 {today.completed || 0} / 실패 {today.failed || 0}
-          </div>
-        </div>
-
-        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-          <div className="text-sm text-slate-500 mb-2">오늘 위반 탐지</div>
-          <div className="text-xl font-bold text-red-600">{today.totalViolations || 0}건</div>
-          <div className="text-xs text-slate-400 mt-1">분석 병원 {today.totalHospitals || 0}개</div>
-        </div>
+        ))}
       </div>
 
-      {/* 실행 중인 작업 */}
+      {/* ━━━ 3. 실행 중인 작업 (라이브) ━━━ */}
       {runningJobs.length > 0 && (
         <div className="bg-white rounded-2xl border border-blue-200 shadow-sm overflow-hidden">
-          <div className="px-6 py-4 border-b border-blue-100 bg-blue-50/50">
+          <div className="px-6 py-3 border-b border-blue-100 bg-gradient-to-r from-blue-50 to-white flex items-center justify-between">
             <h3 className="text-sm font-semibold text-blue-700 flex items-center gap-2">
-              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              <div className="w-2.5 h-2.5 bg-blue-500 rounded-full animate-pulse" />
               실행 중인 작업 ({runningJobs.length})
             </h3>
+            <span className="text-xs text-blue-400">5초마다 자동 갱신</span>
           </div>
           <div className="divide-y divide-slate-100">
-            {runningJobs.map((job) => (
-              <div key={job.id} className="px-6 py-4 flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
-                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-medium text-slate-700">{job.job_id}</div>
-                    <div className="text-xs text-slate-400 mt-0.5">
-                      {job.region || '-'} · {job.type === 'scheduled' ? '예약' : '수동'} · 시작: {formatTime(job.started_at)}
+            {runningJobs.map((job) => {
+              const elapsed = Math.max(0, Math.floor((now - new Date(job.started_at).getTime()) / 1000));
+              const isCancelReq = job.status === 'cancel_requested';
+              return (
+                <div key={job.id} className={`px-6 py-4 ${isCancelReq ? 'bg-orange-50/50' : ''}`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+                        isCancelReq ? 'bg-orange-100' : 'bg-blue-100'
+                      }`}>
+                        {isCancelReq
+                          ? <span className="text-lg">🛑</span>
+                          : <div className="w-5 h-5 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-slate-700 font-mono">{job.job_id}</span>
+                          {typeBadge(job.type)}
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
+                          <span>📍 {job.region || '-'}</span>
+                          <span>시작: {formatTime(job.started_at)}</span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-right">
+                        <div className={`text-lg font-bold font-mono ${isCancelReq ? 'text-orange-600' : 'text-blue-600'}`}>
+                          {formatElapsed(job.started_at)}
+                        </div>
+                        <div className="text-xs text-slate-400">경과 시간</div>
+                      </div>
+                      {job.status === 'running' && (
+                        <button
+                          onClick={() => handleCancelJob(job.job_id)}
+                          disabled={cancellingJob === job.job_id}
+                          className="px-4 py-2 rounded-xl text-xs font-semibold bg-red-500 hover:bg-red-600 text-white transition-all shadow-sm disabled:opacity-50 active:scale-95"
+                        >
+                          {cancellingJob === job.job_id ? '요청 중...' : '중지'}
+                        </button>
+                      )}
+                      {isCancelReq && (
+                        <span className="px-3 py-1.5 rounded-lg text-xs font-medium bg-orange-100 text-orange-700 border border-orange-200">
+                          취소 처리 중...
+                        </span>
+                      )}
                     </div>
                   </div>
+                  {/* 파이프라인 단계 표시 */}
+                  <div className="mt-3 flex items-center gap-1 text-xs">
+                    {['CSV 로드', '분석 실행', '결과 전송'].map((step, i) => {
+                      const active = i === 1; // 실행 중이면 분석 단계
+                      const done = i === 0;
+                      return (
+                        <React.Fragment key={step}>
+                          <div className={`px-2.5 py-1 rounded-md ${
+                            done ? 'bg-emerald-100 text-emerald-700' :
+                            active ? 'bg-blue-100 text-blue-700 font-medium' :
+                            'bg-slate-100 text-slate-400'
+                          }`}>
+                            {done ? '✓ ' : active ? '▶ ' : ''}{step}
+                          </div>
+                          {i < 2 && <span className="text-slate-300">→</span>}
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
                 </div>
-                <div className="flex items-center gap-3">
-                  {statusBadge(job.status)}
-                  {job.status === 'running' && (
-                    <button
-                      onClick={() => handleCancelJob(job.job_id)}
-                      disabled={cancellingJob === job.job_id}
-                      className="px-4 py-1.5 rounded-lg text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition-colors disabled:opacity-50"
-                    >
-                      {cancellingJob === job.job_id ? '중지 요청 중...' : '중지'}
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
 
-      {/* 수동 실행 + 스케줄러 정보 */}
+      {/* ━━━ 대기 트리거 알림 ━━━ */}
+      {pending > 0 && (
+        <div className="px-4 py-3 rounded-xl text-sm bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-2">
+          <span>⏳</span>
+          대기 중인 트리거 <span className="font-bold">{pending}건</span> — 스케줄러가 곧 처리합니다
+        </div>
+      )}
+
+      {/* ━━━ 4. 수동 실행 + 스케줄 정보 ━━━ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-700 mb-4">수동 크롤링 실행</h3>
-          <div className="flex items-center gap-3">
-            <select
-              value={triggerRegion}
-              onChange={(e) => setTriggerRegion(e.target.value)}
-              className="px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white"
-            >
-              <option value="서울">서울</option>
-              <option value="경기">경기</option>
-              <option value="부산">부산</option>
-              <option value="대구">대구</option>
-              <option value="인천">인천</option>
-              <option value="광주">광주</option>
-              <option value="대전">대전</option>
-            </select>
+          <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">👆 수동 크롤링 실행</h3>
+          <div className="space-y-3">
+            <div className="flex items-center gap-3">
+              <div className="flex-1">
+                <label className="text-xs text-slate-500 mb-1 block">지역</label>
+                <select
+                  value={triggerRegion}
+                  onChange={(e) => setTriggerRegion(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-blue-100 focus:border-blue-300 transition-colors"
+                >
+                  {['서울','경기','부산','대구','인천','광주','대전'].map(r =>
+                    <option key={r} value={r}>{r}</option>
+                  )}
+                </select>
+              </div>
+              <div className="flex-1">
+                <label className="text-xs text-slate-500 mb-1 block">옵션</label>
+                <label className="flex items-center gap-2 px-3 py-2 border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 transition-colors">
+                  <input type="checkbox" checked={triggerAi} onChange={(e) => setTriggerAi(e.target.checked)} className="rounded" />
+                  <span className="text-sm text-slate-600">AI 분석</span>
+                </label>
+              </div>
+            </div>
             <button
               onClick={handleTrigger}
               disabled={triggering || !isOnline}
-              className={`px-5 py-2 rounded-lg text-sm font-medium transition-colors ${
+              className={`w-full py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-[0.98] ${
                 isOnline
-                  ? 'bg-blue-600 hover:bg-blue-700 text-white'
+                  ? 'bg-blue-600 hover:bg-blue-700 text-white shadow-sm'
                   : 'bg-slate-200 text-slate-400 cursor-not-allowed'
               }`}
             >
-              {triggering ? '요청 중...' : '크롤링 시작'}
+              {triggering ? '트리거 등록 중...' : isOnline ? '크롤링 시작' : '스케줄러 오프라인'}
             </button>
           </div>
         </div>
 
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-700 mb-4">스케줄 정보</h3>
+          <h3 className="text-sm font-semibold text-slate-700 mb-4 flex items-center gap-2">🕐 스케줄 정보</h3>
           {status?.schedulerInfo ? (
-            <div className="space-y-2 text-sm">
-              <div className="flex justify-between">
-                <span className="text-slate-500">다음 예정</span>
-                <span className="text-slate-700 font-medium">{formatTime(status.schedulerInfo.nextScheduledRun)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">실행 중 작업</span>
-                <span className="text-slate-700 font-medium">{status.schedulerInfo.runningJobs || 0}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-slate-500">대기 작업</span>
-                <span className="text-slate-700 font-medium">{status.schedulerInfo.queuedJobs || 0}</span>
-              </div>
-              {status.schedulerInfo.schedules && (
-                <div className="flex justify-between">
-                  <span className="text-slate-500">스케줄</span>
-                  <span className="text-slate-700 font-medium">{status.schedulerInfo.schedules.join(', ')}</span>
+            <div className="space-y-3">
+              {(status.schedulerInfo.schedules || []).map((s, i) => (
+                <div key={i} className="flex items-center gap-3 p-2.5 rounded-lg bg-indigo-50/50 border border-indigo-100">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center text-sm">🔄</div>
+                  <div>
+                    <div className="text-sm font-medium text-indigo-700">{s}</div>
+                    <div className="text-xs text-indigo-400">매일 · 서울 · 자동 실행</div>
+                  </div>
                 </div>
-              )}
+              ))}
+              <div className="pt-2 border-t border-slate-100">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">다음 실행</span>
+                  <span className="font-medium text-slate-700">{formatTime(status.schedulerInfo.nextScheduledRun)}</span>
+                </div>
+              </div>
             </div>
           ) : (
-            <p className="text-sm text-slate-400">스케줄러 정보 없음</p>
+            <div className="text-center py-4">
+              <p className="text-sm text-slate-400">스케줄러가 오프라인입니다</p>
+              <p className="text-xs text-slate-300 mt-1">스케줄러를 시작하면 자동 스케줄이 활성화됩니다</p>
+            </div>
           )}
         </div>
       </div>
 
-      {/* 마지막 결과 요약 */}
+      {/* ━━━ 5. 마지막 크롤링 결과 ━━━ */}
       {last && (
-        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-          <h3 className="text-sm font-semibold text-slate-700 mb-4">마지막 크롤링 결과</h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-            <div>
-              <span className="text-xs text-slate-500 block">지역</span>
-              <span className="text-sm font-medium text-slate-700">{last.region || '-'}</span>
-            </div>
-            <div>
-              <span className="text-xs text-slate-500 block">유형</span>
-              {typeBadge(last.type)}
-            </div>
-            <div>
-              <span className="text-xs text-slate-500 block">소요시간</span>
-              <span className="text-sm font-medium text-slate-700">{formatDuration(last.duration_seconds)}</span>
-            </div>
-            <div>
-              <span className="text-xs text-slate-500 block">분석 병원</span>
-              <span className="text-sm font-medium text-blue-600">{last.hospitals_analyzed || 0}개</span>
-            </div>
-            <div>
-              <span className="text-xs text-slate-500 block">위반 탐지</span>
-              <span className="text-sm font-medium text-red-600">{last.violations_found || 0}건</span>
-            </div>
+        <div className={`rounded-2xl p-6 border shadow-sm ${
+          last.status === 'completed' ? 'bg-emerald-50/30 border-emerald-200' :
+          last.status === 'failed' ? 'bg-red-50/30 border-red-200' :
+          'bg-white border-slate-200'
+        }`}>
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-slate-700 flex items-center gap-2">
+              📋 마지막 크롤링 결과
+            </h3>
+            {statusBadge(last.status)}
           </div>
+          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+            {[
+              { label: '지역', value: last.region || '-', icon: '📍' },
+              { label: '유형', value: last.type === 'scheduled' ? '예약' : '수동', icon: last.type === 'scheduled' ? '🕐' : '👆' },
+              { label: '시작 시간', value: formatTime(last.started_at), icon: '🕑' },
+              { label: '소요시간', value: formatDuration(last.duration_seconds), icon: '⏱️' },
+              { label: '분석 병원', value: `${last.hospitals_analyzed || 0}개`, icon: '🏥' },
+              { label: '위반 탐지', value: `${last.violations_found || 0}건`, icon: '⚠️' },
+            ].map(item => (
+              <div key={item.label}>
+                <div className="text-xs text-slate-500 flex items-center gap-1 mb-1">{item.icon} {item.label}</div>
+                <div className="text-sm font-semibold text-slate-700">{item.value}</div>
+              </div>
+            ))}
+          </div>
+          {last.error_details && (
+            <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-100 text-xs text-red-600 font-mono">
+              {last.error_details}
+            </div>
+          )}
         </div>
       )}
 
-      {/* 실행 이력 테이블 */}
+      {/* ━━━ 6. 실행 이력 테이블 (확장 가능) ━━━ */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-slate-700">실행 이력</h3>
-          <button onClick={() => { loadStatus(); loadLogs(); }} className="text-xs text-blue-600 hover:text-blue-800">새로고침</button>
+          <div className="flex items-center gap-3">
+            <h3 className="text-sm font-semibold text-slate-700">📜 실행 이력</h3>
+            <span className="text-xs text-slate-400">{logs.length}건</span>
+          </div>
+          <div className="flex items-center gap-3">
+            {lastRefresh && (
+              <span className="text-xs text-slate-400">
+                갱신: {lastRefresh.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+              </span>
+            )}
+            <button
+              onClick={loadAll}
+              className="px-3 py-1.5 text-xs text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors font-medium"
+            >
+              🔄 새로고침
+            </button>
+          </div>
         </div>
         {logs.length === 0 ? (
-          <div className="p-12 text-center text-slate-400">실행 이력이 없습니다</div>
+          <div className="p-16 text-center">
+            <div className="text-4xl mb-3">📭</div>
+            <p className="text-sm text-slate-400">실행 이력이 없습니다</p>
+            <p className="text-xs text-slate-300 mt-1">크롤링을 실행하면 여기에 기록됩니다</p>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="bg-slate-50">
+              <thead className="bg-slate-50/80">
                 <tr>
-                  <th className="text-left p-4 font-medium text-slate-600">시간</th>
-                  <th className="text-center p-4 font-medium text-slate-600">유형</th>
-                  <th className="text-center p-4 font-medium text-slate-600">지역</th>
-                  <th className="text-center p-4 font-medium text-slate-600">병원수</th>
-                  <th className="text-center p-4 font-medium text-slate-600">위반</th>
-                  <th className="text-center p-4 font-medium text-slate-600">소요시간</th>
-                  <th className="text-center p-4 font-medium text-slate-600">상태</th>
+                  <th className="text-left p-3 pl-6 font-medium text-slate-500 text-xs uppercase tracking-wider"></th>
+                  <th className="text-left p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">시간</th>
+                  <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">유형</th>
+                  <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">지역</th>
+                  <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">병원수</th>
+                  <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">위반</th>
+                  <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">소요시간</th>
+                  <th className="text-center p-3 pr-6 font-medium text-slate-500 text-xs uppercase tracking-wider">상태</th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
-                {logs.map((log, i) => (
-                  <tr key={log.id} className={i % 2 === 0 ? 'bg-white' : 'bg-blue-50/30'}>
-                    <td className="p-4 text-slate-700">{formatTime(log.started_at)}</td>
-                    <td className="p-4 text-center">{typeBadge(log.type)}</td>
-                    <td className="p-4 text-center text-slate-600">{log.region || '-'}</td>
-                    <td className="p-4 text-center text-slate-700 font-medium">{log.hospitals_analyzed || 0}</td>
-                    <td className="p-4 text-center text-red-600 font-medium">{log.violations_found || 0}</td>
-                    <td className="p-4 text-center text-slate-500">{formatDuration(log.duration_seconds)}</td>
-                    <td className="p-4 text-center">{statusBadge(log.status)}</td>
-                  </tr>
-                ))}
+              <tbody>
+                {logs.map((log, i) => {
+                  const isExpanded = expandedLog === log.id;
+                  return (
+                    <React.Fragment key={log.id}>
+                      <tr
+                        className={`cursor-pointer transition-colors ${
+                          isExpanded ? 'bg-blue-50/50' : i % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/30 hover:bg-slate-50'
+                        }`}
+                        onClick={() => setExpandedLog(isExpanded ? null : log.id)}
+                      >
+                        <td className="p-3 pl-6 text-slate-400 text-xs">
+                          {isExpanded ? '▼' : '▶'}
+                        </td>
+                        <td className="p-3 text-slate-700 font-medium">{formatTime(log.started_at)}</td>
+                        <td className="p-3 text-center">{typeBadge(log.type)}</td>
+                        <td className="p-3 text-center text-slate-600">{log.region || '-'}</td>
+                        <td className="p-3 text-center">
+                          <span className="text-slate-700 font-semibold">{log.hospitals_analyzed || 0}</span>
+                          {log.hospitals_total > 0 && log.hospitals_total !== log.hospitals_analyzed && (
+                            <span className="text-slate-400 text-xs">/{log.hospitals_total}</span>
+                          )}
+                        </td>
+                        <td className="p-3 text-center">
+                          <span className={`font-semibold ${(log.violations_found || 0) > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                            {log.violations_found || 0}
+                          </span>
+                        </td>
+                        <td className="p-3 text-center text-slate-500">{formatDuration(log.duration_seconds)}</td>
+                        <td className="p-3 pr-6 text-center">{statusBadge(log.status)}</td>
+                      </tr>
+                      {isExpanded && (
+                        <tr>
+                          <td colSpan={8} className="bg-slate-50/80 px-6 py-4 border-t border-slate-100">
+                            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-xs">
+                              <div>
+                                <span className="text-slate-400 block mb-0.5">Job ID</span>
+                                <span className="text-slate-700 font-mono font-medium">{log.job_id || '-'}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block mb-0.5">Trigger ID</span>
+                                <span className="text-slate-700 font-mono font-medium">{log.trigger_id || '-'}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block mb-0.5">시작</span>
+                                <span className="text-slate-700">{formatTime(log.started_at)}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block mb-0.5">완료</span>
+                                <span className="text-slate-700">{formatTime(log.completed_at)}</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block mb-0.5">전체 병원</span>
+                                <span className="text-slate-700 font-medium">{log.hospitals_total || 0}개</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block mb-0.5">분석 완료</span>
+                                <span className="text-slate-700 font-medium">{log.hospitals_analyzed || 0}개</span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block mb-0.5">오류 수</span>
+                                <span className={`font-medium ${(log.error_count || 0) > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                                  {log.error_count || 0}
+                                </span>
+                              </div>
+                              <div>
+                                <span className="text-slate-400 block mb-0.5">Log ID</span>
+                                <span className="text-slate-700 font-mono text-xs">{log.id}</span>
+                              </div>
+                            </div>
+                            {log.error_details && (
+                              <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-100">
+                                <span className="text-xs text-red-500 font-medium block mb-1">오류 상세</span>
+                                <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{log.error_details}</pre>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
+                  );
+                })}
               </tbody>
             </table>
           </div>

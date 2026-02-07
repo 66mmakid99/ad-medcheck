@@ -69,7 +69,7 @@ async function callGeminiText(apiKey: string, prompt: string): Promise<string> {
 // 프롬프트 생성
 // ============================================
 
-function buildVerificationPrompt(extractedText: string, violations: ViolationItem[]): string {
+function buildVerificationPrompt(extractedText: string, violations: ViolationItem[], fpContext?: string): string {
   const violationList = violations.map((v, i) => {
     return `${i + 1}. [${v.patternId}] "${v.matchedText}" - ${v.description} (${v.category}, ${v.severity})`;
   }).join('\n');
@@ -90,7 +90,7 @@ ${violationList}
 - 단순히 키워드가 포함되어 있다고 위반이 아님 (예: "100% 예약제"는 치료효과 보장이 아님)
 - 의학적 설명이나 정당한 정보 제공은 위반이 아님
 - 면책 문구가 함께 있는 경우 위반 가능성 낮음
-
+${fpContext || ''}
 ## 응답 형식
 반드시 아래 JSON 배열 형식으로만 응답하세요. 설명 없이 JSON만 출력하세요.
 
@@ -168,18 +168,26 @@ function parseAIResponse(raw: string, violations: ViolationItem[]): HybridVerifi
 
 const AI_CONFIDENCE_THRESHOLD = 70;
 
+/** FP 학습 데이터 (분석 시 주입) */
+export interface FpLearningData {
+  fpContext: string;                                    // Gemini 프롬프트에 추가할 FP 컨텍스트
+  fpPenaltyMap: Map<string, { fpRate: number; confidencePenalty: number }>;  // 패턴별 confidence 감점
+}
+
 /**
  * 정규식 매칭 결과를 Gemini Flash로 2차 검증
  *
  * @param apiKey - Gemini API 키
  * @param extractedText - OCR로 추출된 전체 텍스트
  * @param violations - 1차 정규식 매칭으로 탐지된 위반 항목 배열
+ * @param fpLearning - FP 학습 데이터 (선택)
  * @returns HybridResult - 검증 결과 (확정 위반 + 오탐 후보)
  */
 export async function verifyViolationsWithAI(
   apiKey: string,
   extractedText: string,
-  violations: ViolationItem[]
+  violations: ViolationItem[],
+  fpLearning?: FpLearningData
 ): Promise<HybridResult> {
   const startTime = Date.now();
 
@@ -194,13 +202,13 @@ export async function verifyViolationsWithAI(
   }
 
   // 프롬프트 구성 → Gemini Flash 1회 호출 (배치)
-  const prompt = buildVerificationPrompt(extractedText, violations);
+  const prompt = buildVerificationPrompt(extractedText, violations, fpLearning?.fpContext);
   const rawResponse = await callGeminiText(apiKey, prompt);
 
   // AI 응답 파싱
   const verifications = parseAIResponse(rawResponse, violations);
 
-  // aiConfidence 기준 분류
+  // aiConfidence 기준 분류 (FP 이력 반영)
   const confirmedViolations: ViolationItem[] = [];
   const falsePositiveCandidates: ViolationItem[] = [];
 
@@ -210,15 +218,25 @@ export async function verifyViolationsWithAI(
     );
     if (!originalViolation) continue;
 
+    // FP 이력에 따른 confidence 감점
+    let adjustedConfidence = verification.aiConfidence;
+    if (fpLearning?.fpPenaltyMap) {
+      const penalty = fpLearning.fpPenaltyMap.get(verification.patternId);
+      if (penalty && penalty.confidencePenalty > 0) {
+        adjustedConfidence = Math.max(0, adjustedConfidence - penalty.confidencePenalty * 100);
+      }
+    }
+
     // AI 결과를 원본에 병합
     const enriched: ViolationItem = {
       ...originalViolation,
-      aiConfidence: verification.aiConfidence,
+      aiConfidence: adjustedConfidence,
+      aiConfidenceRaw: verification.aiConfidence,
       aiVerdict: verification.aiVerdict,
       aiReasoning: verification.reasoning,
     };
 
-    if (verification.aiConfidence >= AI_CONFIDENCE_THRESHOLD) {
+    if (adjustedConfidence >= AI_CONFIDENCE_THRESHOLD) {
       confirmedViolations.push(enriched);
     } else {
       falsePositiveCandidates.push(enriched);

@@ -1532,7 +1532,7 @@ function HistoryTab({ apiBase }) {
 // OCR 분석 탭
 // ============================================
 function OcrTab({ apiBase }) {
-  const [subTab, setSubTab] = useState('results'); // results | analyze | accuracy
+  const [subTab, setSubTab] = useState('results'); // results | analyze | accuracy | fpManage
   const [results, setResults] = useState([]);
   const [pagination, setPagination] = useState({ total: 0, limit: 20, offset: 0, hasMore: false });
   const [loading, setLoading] = useState(true);
@@ -1555,6 +1555,11 @@ function OcrTab({ apiBase }) {
   const [fpPatterns, setFpPatterns] = useState([]);
   const [accuracyLoading, setAccuracyLoading] = useState(false);
 
+  // 패턴 관리
+  const [fpManageData, setFpManageData] = useState([]);
+  const [fpManageLoading, setFpManageLoading] = useState(false);
+  const [fpTogglingId, setFpTogglingId] = useState(null);
+
   const gradeColors = {
     'S': { bg: 'bg-cyan-100', text: 'text-cyan-700' },
     'A': { bg: 'bg-emerald-100', text: 'text-emerald-700' },
@@ -1566,6 +1571,7 @@ function OcrTab({ apiBase }) {
 
   useEffect(() => { loadResults(); }, [filterGrade, filterMode]);
   useEffect(() => { if (subTab === 'accuracy') loadAccuracy(); }, [subTab, accuracyPeriod]);
+  useEffect(() => { if (subTab === 'fpManage') loadFpManage(); }, [subTab]);
 
   const loadResults = async (offset = 0) => {
     setLoading(true);
@@ -1648,6 +1654,30 @@ function OcrTab({ apiBase }) {
     setAccuracyLoading(false);
   };
 
+  const loadFpManage = async () => {
+    setFpManageLoading(true);
+    try {
+      const res = await fetch(`${apiBase}/api/ocr/fp-patterns`);
+      const d = await res.json();
+      if (d.success) setFpManageData(d.data || []);
+    } catch (e) { console.error(e); }
+    setFpManageLoading(false);
+  };
+
+  const toggleFpPattern = async (patternId, currentAction) => {
+    const newAction = currentAction === 'suppress' ? 'normal' : 'suppress';
+    setFpTogglingId(patternId);
+    try {
+      await fetch(`${apiBase}/api/ocr/fp-patterns/${encodeURIComponent(patternId)}/suppress`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: newAction }),
+      });
+      await loadFpManage();
+    } catch (e) { console.error(e); }
+    setFpTogglingId(null);
+  };
+
   return (
     <div className="space-y-6">
       {/* 서브탭 */}
@@ -1656,6 +1686,7 @@ function OcrTab({ apiBase }) {
           { id: 'results', label: '분석 결과', icon: '📋' },
           { id: 'analyze', label: '이미지 분석', icon: '🔍' },
           { id: 'accuracy', label: 'AI 정확도', icon: '🎯' },
+          { id: 'fpManage', label: '패턴 관리', icon: '⚙️' },
         ].map(tab => (
           <button
             key={tab.id}
@@ -2207,6 +2238,124 @@ function OcrTab({ apiBase }) {
             </>
           ) : (
             <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">정확도 데이터가 없습니다</div>
+          )}
+        </div>
+      )}
+
+      {/* ========== 패턴 관리 서브탭 ========== */}
+      {subTab === 'fpManage' && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-lg font-semibold text-slate-800">패턴별 FP 학습 현황</h3>
+              <p className="text-sm text-slate-500 mt-1">피드백 기반 FP 비율 + 패턴 활성/비활성 관리</p>
+            </div>
+            <button onClick={loadFpManage} className="px-4 py-2 text-sm bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
+              새로고침
+            </button>
+          </div>
+
+          {fpManageLoading ? (
+            <div className="flex items-center justify-center py-20">
+              <div className="w-8 h-8 border-3 border-blue-500 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+          ) : fpManageData.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">
+              피드백이 있는 패턴이 없습니다. OCR 분석 후 피드백을 남기면 여기에 표시됩니다.
+            </div>
+          ) : (
+            <>
+              {/* 요약 카드 */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                  <div className="text-sm text-slate-500 mb-1">피드백 있는 패턴</div>
+                  <div className="text-2xl font-bold text-slate-700">{fpManageData.length}개</div>
+                </div>
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                  <div className="text-sm text-slate-500 mb-1">FP 50%+ (주의 필요)</div>
+                  <div className="text-2xl font-bold text-red-600">{fpManageData.filter(p => p.fpRate >= 0.5).length}개</div>
+                </div>
+                <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+                  <div className="text-sm text-slate-500 mb-1">비활성 패턴</div>
+                  <div className="text-2xl font-bold text-amber-600">{fpManageData.filter(p => p.action === 'suppress').length}개</div>
+                </div>
+              </div>
+
+              {/* 패턴 테이블 */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
+                      <tr>
+                        <th className="text-left p-4 font-medium text-slate-600">패턴 ID</th>
+                        <th className="text-left p-4 font-medium text-slate-600">카테고리</th>
+                        <th className="text-center p-4 font-medium text-slate-600">FP 비율</th>
+                        <th className="text-center p-4 font-medium text-slate-600">FP / 전체</th>
+                        <th className="text-center p-4 font-medium text-slate-600">감점</th>
+                        <th className="text-center p-4 font-medium text-slate-600">상태</th>
+                        <th className="text-center p-4 font-medium text-slate-600">토글</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {fpManageData.map((p, i) => {
+                        const fpPct = Math.round(p.fpRate * 100);
+                        const isHighFp = p.fpRate >= 0.5;
+                        const isSuppressed = p.action === 'suppress';
+                        return (
+                          <tr key={p.patternId} className={`${isHighFp ? 'bg-red-50/50' : i % 2 === 0 ? 'bg-white' : 'bg-blue-50/30'}`}>
+                            <td className="p-4">
+                              <span className="font-mono text-xs bg-slate-100 px-2 py-1 rounded">{p.patternId}</span>
+                            </td>
+                            <td className="p-4 text-slate-600">{p.category || '-'}</td>
+                            <td className="p-4 text-center">
+                              <div className="flex items-center justify-center gap-2">
+                                <div className="w-16 h-2 bg-slate-200 rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full ${fpPct >= 50 ? 'bg-red-500' : fpPct >= 30 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                                    style={{ width: `${Math.min(fpPct, 100)}%` }}
+                                  />
+                                </div>
+                                <span className={`text-xs font-bold ${fpPct >= 50 ? 'text-red-600' : fpPct >= 30 ? 'text-amber-600' : 'text-emerald-600'}`}>
+                                  {fpPct}%
+                                </span>
+                              </div>
+                            </td>
+                            <td className="p-4 text-center text-slate-500 text-xs">{p.fpCount} / {p.totalFeedback}</td>
+                            <td className="p-4 text-center">
+                              {p.confidencePenalty > 0 ? (
+                                <span className="text-xs text-red-500 font-medium">-{Math.round(p.confidencePenalty * 100)}</span>
+                              ) : (
+                                <span className="text-xs text-slate-300">-</span>
+                              )}
+                            </td>
+                            <td className="p-4 text-center">
+                              {isSuppressed ? (
+                                <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-red-100 text-red-700">비활성</span>
+                              ) : (
+                                <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-700">활성</span>
+                              )}
+                            </td>
+                            <td className="p-4 text-center">
+                              <button
+                                onClick={() => toggleFpPattern(p.patternId, p.action)}
+                                disabled={fpTogglingId === p.patternId}
+                                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                                  isSuppressed
+                                    ? 'bg-emerald-50 hover:bg-emerald-100 text-emerald-700'
+                                    : 'bg-red-50 hover:bg-red-100 text-red-700'
+                                }`}
+                              >
+                                {fpTogglingId === p.patternId ? '...' : isSuppressed ? '활성화' : '비활성화'}
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}

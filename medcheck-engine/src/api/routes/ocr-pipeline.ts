@@ -13,7 +13,8 @@ import { Hono } from 'hono';
 import { callGeminiVision, OCR_ONLY_PROMPT } from '../../services/gemini-ocr';
 import { violationDetector } from '../../modules/violation-detector';
 import { verifyViolationsWithAI } from '../../services/hybrid-analyzer';
-import type { ViolationItem } from '../../services/hybrid-analyzer';
+import type { ViolationItem, FpLearningData } from '../../services/hybrid-analyzer';
+import { createFpLearning } from '../../services/fp-learning';
 import type { D1Database } from '../../db/d1';
 
 // ============================================
@@ -248,13 +249,29 @@ ocrPipelineRoutes.post('/analyze-hybrid', async (c) => {
       department: options?.department as any,
     });
 
-    const patternViolations = detectionResult.judgment.violations as ViolationItem[];
+    const allPatternViolations = detectionResult.judgment.violations as ViolationItem[];
 
-    // 4. 2차 AI 검증
+    // 3.5. FP 학습 데이터 로드 → suppress된 패턴 필터링
+    const fpLearning = createFpLearning(c.env.DB);
+    const { suppressedPatternIds, fpPenaltyMap } = await fpLearning.getActiveOverrides();
+
+    const patternViolations = allPatternViolations.filter(
+      v => !suppressedPatternIds.has(v.patternId)
+    );
+
+    // FP 컨텍스트 생성 (Gemini 프롬프트에 주입)
+    const fpContext = await fpLearning.buildFpContext();
+    const fpData: FpLearningData | undefined = (fpContext || fpPenaltyMap.size > 0) ? {
+      fpContext,
+      fpPenaltyMap,
+    } : undefined;
+
+    // 4. 2차 AI 검증 (FP 학습 반영)
     const hybridResult = await verifyViolationsWithAI(
       apiKey,
       extractedText,
-      patternViolations
+      patternViolations,
+      fpData
     );
 
     const resultId = generateId();
@@ -704,6 +721,96 @@ ocrPipelineRoutes.get('/accuracy/false-positives', async (c) => {
         byPattern: fpByPattern.results || [],
         items: fpItems.results || [],
       }
+    });
+  } catch (error: unknown) {
+    return c.json({
+      success: false,
+      error: { code: 'DB_ERROR', message: error instanceof Error ? error.message : String(error) }
+    }, 500);
+  }
+});
+
+// ============================================
+// FP 학습 패턴 API
+// ============================================
+
+/**
+ * GET /api/ocr/fp-patterns - 패턴별 FP 통계
+ */
+ocrPipelineRoutes.get('/fp-patterns', async (c) => {
+  try {
+    const fpLearning = createFpLearning(c.env.DB);
+
+    // FP 통계 집계 실행
+    await fpLearning.aggregateFpStats();
+
+    // 전체 패턴 목록 + 오버라이드 JOIN
+    const result = await c.env.DB.prepare(`
+      SELECT
+        f.pattern_id,
+        f.category,
+        f.matched_text as sample_text,
+        COALESCE(o.fp_rate, 0) as fp_rate,
+        COALESCE(o.total_feedback, 0) as total_feedback,
+        COALESCE(o.fp_count, 0) as fp_count,
+        COALESCE(o.correct_count, 0) as correct_count,
+        COALESCE(o.action, 'normal') as action,
+        COALESCE(o.confidence_penalty, 0) as confidence_penalty,
+        o.updated_at
+      FROM (
+        SELECT DISTINCT pattern_id, category, matched_text
+        FROM ocr_feedback
+        WHERE pattern_id IS NOT NULL AND pattern_id != ''
+      ) f
+      LEFT JOIN fp_pattern_overrides o ON f.pattern_id = o.pattern_id
+      ORDER BY COALESCE(o.fp_rate, 0) DESC, COALESCE(o.total_feedback, 0) DESC
+    `).all();
+
+    return c.json({
+      success: true,
+      data: result.results.map((r: any) => ({
+        patternId: r.pattern_id,
+        category: r.category,
+        sampleText: r.sample_text,
+        fpRate: r.fp_rate,
+        totalFeedback: r.total_feedback,
+        fpCount: r.fp_count,
+        correctCount: r.correct_count,
+        action: r.action,
+        confidencePenalty: r.confidence_penalty,
+        updatedAt: r.updated_at,
+      })),
+    });
+  } catch (error: unknown) {
+    return c.json({
+      success: false,
+      error: { code: 'DB_ERROR', message: error instanceof Error ? error.message : String(error) }
+    }, 500);
+  }
+});
+
+/**
+ * PUT /api/ocr/fp-patterns/:patternId/suppress - 패턴 비활성화/활성화 토글
+ */
+ocrPipelineRoutes.put('/fp-patterns/:patternId/suppress', async (c) => {
+  try {
+    const patternId = c.req.param('patternId');
+    const body = await c.req.json() as { action: 'suppress' | 'normal' };
+    const action = body.action || 'suppress';
+
+    if (!['suppress', 'normal'].includes(action)) {
+      return c.json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'action은 suppress 또는 normal이어야 합니다' }
+      }, 400);
+    }
+
+    const fpLearning = createFpLearning(c.env.DB);
+    await fpLearning.setPatternAction(patternId, action);
+
+    return c.json({
+      success: true,
+      data: { patternId, action, message: action === 'suppress' ? '패턴 비활성화됨' : '패턴 활성화됨' }
     });
   } catch (error: unknown) {
     return c.json({

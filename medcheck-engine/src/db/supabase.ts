@@ -223,8 +223,6 @@ class MockQueryBuilder implements IQueryBuilder {
   }
 
   async execute<T>(): Promise<QueryResult<T>> {
-    console.log(`[MockSupabase] ${this.operation.toUpperCase()} on ${this.tableName}`);
-
     if (this.operation === 'insert') {
       // Mock: ID 생성하여 반환
       const result = this.data.map(d => ({
@@ -248,7 +246,6 @@ export class MockSupabaseClient implements ISupabaseClient {
   }
 
   async rpc(_fn: string, _params?: Record<string, unknown>): Promise<QueryResult<unknown>> {
-    console.log(`[MockSupabase] RPC: ${_fn}`);
     return { data: null, error: null };
   }
 }
@@ -574,7 +571,6 @@ export class SupabaseService {
     totalViolations: number;
   }[]> {
     // 실제 구현 시 Supabase RPC 또는 복잡한 쿼리 필요
-    console.log(`[SupabaseService] getDailyStats for ${days} days`);
     return [];
   }
 

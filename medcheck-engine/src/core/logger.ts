@@ -418,7 +418,6 @@ export class FileLogHandler implements LogHandler {
 
     // 실제 파일 쓰기는 Node.js fs 모듈 사용
     // 여기서는 인터페이스만 정의
-    console.log(`[FileLogHandler] Would write ${this.buffer.length} entries to ${this.filePath}`);
     this.buffer = [];
   }
 }

@@ -47,8 +47,6 @@ async function callGeminiVision(
   } else if (imageData.url) {
     // URL에서 이미지 가져오기 (개선된 방식)
     try {
-      console.log(`[OCR] Fetching image from: ${imageData.url}`);
-
       const imageResponse = await fetch(imageData.url, {
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -61,10 +59,7 @@ async function callGeminiVision(
       }
 
       const contentType = imageResponse.headers.get('content-type') || 'image/jpeg';
-      console.log(`[OCR] Image content-type: ${contentType}`);
-
       const imageBuffer = await imageResponse.arrayBuffer();
-      console.log(`[OCR] Image size: ${imageBuffer.byteLength} bytes`);
 
       if (imageBuffer.byteLength === 0) {
         throw new Error('이미지 데이터가 비어있습니다');
@@ -79,8 +74,6 @@ async function callGeminiVision(
         binary += String.fromCharCode.apply(null, Array.from(chunk));
       }
       const base64 = btoa(binary);
-
-      console.log(`[OCR] Base64 length: ${base64.length}`);
 
       imagePart = {
         inline_data: {
@@ -110,8 +103,6 @@ async function callGeminiVision(
     }
   };
 
-  console.log(`[OCR] Calling Gemini API...`);
-
   const response = await fetch(`${GEMINI_API_URL}?key=${apiKey}`, {
     method: 'POST',
     headers: {
@@ -130,8 +121,6 @@ async function callGeminiVision(
 
   const text = result.candidates?.[0]?.content?.parts?.[0]?.text || '';
   const confidence = 0.9;
-
-  console.log(`[OCR] Gemini response length: ${text.length}`);
 
   return { text, confidence };
 }

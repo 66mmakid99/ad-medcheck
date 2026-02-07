@@ -5,7 +5,7 @@
   "description": "Medical Advertisement Compliance Engine",
   "main": "dist/index.js",
   "scripts": {
-    "build": "esbuild src/index.ts --bundle --format=esm --platform=neutral --outfile=dist/index.js --external:__STATIC_CONTENT_MANIFEST",
+    "build": "esbuild src/index.ts --bundle --format=esm --platform=neutral --outfile=dist/index.js --external:__STATIC_CONTENT_MANIFEST --tree-shaking=true --minify",
     "dev": "wrangler dev",
     "deploy": "npm run build && wrangler deploy"
   },

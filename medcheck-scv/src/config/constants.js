@@ -2,10 +2,10 @@
  * Constants - 설정값 및 상수
  */
 
-// API Keys (환경변수에서 로드)
+// API Keys (환경변수 필수)
 const API_KEYS = {
   ANTHROPIC: process.env.ANTHROPIC_API_KEY,
-  DATA_GO_KR: process.env.DATA_GO_KR_API_KEY || '36bc26283f94b96798aec0084bac0ec86ee1b5146249c84c48d7d0af11c7577d'
+  DATA_GO_KR: process.env.DATA_GO_KR_API_KEY
 };
 
 // Claude 모델 설정

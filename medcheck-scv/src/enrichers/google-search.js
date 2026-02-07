@@ -59,8 +59,12 @@ function isValidHospitalDomain(url) {
   }
 }
 
-// SerpAPI 키
-const SERPAPI_KEY = process.env.SERPAPI_KEY || 'f62dccabe3e331c60eb068fad7979b1a3c2031aaf0a83b9540f86f29ba25207f';
+// SerpAPI 키 (환경변수 필수)
+const SERPAPI_KEY = process.env.SERPAPI_KEY;
+if (!SERPAPI_KEY) {
+  console.error('[ERROR] SERPAPI_KEY 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요.');
+  process.exit(1);
+}
 
 /**
  * SerpAPI로 구글 검색하여 홈페이지 찾기

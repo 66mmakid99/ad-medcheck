@@ -1,2 +1,5 @@
-node_modules/ 
-nul 
+node_modules/
+nul
+.env
+.env.local
+.env.*.local

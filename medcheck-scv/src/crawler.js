@@ -9,8 +9,12 @@ const { createCrawlSession, uploadHospitals, completeCrawlSession } = require('.
 // Configuration
 // ============================================
 
-// API Configuration (환경변수 우선, 하드코딩 fallback)
-const API_KEY = process.env.DATA_GO_KR_API_KEY || '36bc26283f94b96798aec0084bac0ec86ee1b5146249c84c48d7d0af11c7577d';
+// API Configuration (환경변수 필수)
+const API_KEY = process.env.DATA_GO_KR_API_KEY;
+if (!API_KEY) {
+  console.error('[ERROR] DATA_GO_KR_API_KEY 환경변수가 설정되지 않았습니다. .env 파일을 확인하세요.');
+  process.exit(1);
+}
 const BASE_URL = 'https://apis.data.go.kr/B551182/hospInfoServicev2/getHospBasisList';
 
 // Checkpoint Configuration

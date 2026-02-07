@@ -9,7 +9,7 @@ import PriceAnalytics from './PriceAnalytics';
 const API_BASE = 'https://medcheck-engine.mmakid.workers.dev';
 
 export default function MedCheckDashboard() {
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('analyze');
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -98,14 +98,12 @@ export default function MedCheckDashboard() {
 
   // 사이드바 메뉴
   const menuItems = [
-    { id: 'overview', name: '분석', icon: '🔍' },
-    { id: 'batch', name: '배치분석', icon: '📁' },
+    { id: 'analyze', name: 'URL 분석', icon: '🔍' },
     { id: 'adcheck', name: '에드체크', icon: '✅' },
     { id: 'pricing', name: '시술가격', icon: '💰', badge: priceAlerts.length },
     { id: 'alerts', name: '가격알림', icon: '🔔', badge: priceAlerts.filter(a => !a.is_read).length },
     { id: 'mapping', name: '매핑승인', icon: '🔄', badge: mappingCandidates.length },
-    { id: 'fp', name: '예외/오탐', icon: '⚠️', badge: fpStats.summary?.pending || 0 },
-    { id: 'tricks', name: '꼼수', icon: '🎭', badge: tricksStats.summary?.total || 0 },
+    { id: 'patternMgmt', name: '패턴 관리', icon: '🛡️', badge: (fpStats.summary?.pending || 0) + (tricksStats.summary?.total || 0) },
     { id: 'performance', name: '성능', icon: '📈' },
     { id: 'history', name: '이력', icon: '📜' },
     { id: 'priceAnalytics', name: '가격분석', icon: '📊' },
@@ -251,11 +249,10 @@ export default function MedCheckDashboard() {
 
         {/* 메인 콘텐츠 영역 */}
         <main className="flex-1 overflow-auto p-6">
-          {activeTab === 'overview' && <AnalyzeTab apiBase={API_BASE} />}
-          {activeTab === 'batch' && <BatchAnalyzeTab apiBase={API_BASE} />}
+          {activeTab === 'analyze' && <UrlAnalysisPage apiBase={API_BASE} />}
           {activeTab === 'adcheck' && <AdCheckTab apiBase={API_BASE} />}
           {activeTab === 'pricing' && (
-            <PricingTab 
+            <PricingTab
               priceStats={priceStats}
               procedures={procedures}
               targetAreas={targetAreas}
@@ -269,7 +266,7 @@ export default function MedCheckDashboard() {
             />
           )}
           {activeTab === 'alerts' && (
-            <AlertsTab 
+            <AlertsTab
               priceAlerts={priceAlerts}
               selectedAlert={selectedAlert}
               loadAlertDetail={loadAlertDetail}
@@ -277,16 +274,15 @@ export default function MedCheckDashboard() {
             />
           )}
           {activeTab === 'mapping' && (
-            <MappingTab 
+            <MappingTab
               mappingCandidates={mappingCandidates}
               approveMappingCandidate={approveMappingCandidate}
               rejectMappingCandidate={rejectMappingCandidate}
             />
           )}
-          {activeTab === 'fp' && (
-            <FalsePositiveTab apiBase={API_BASE} fpStats={fpStats} suggestions={suggestions} onRefresh={loadAllData} />
+          {activeTab === 'patternMgmt' && (
+            <PatternManagementPage apiBase={API_BASE} fpStats={fpStats} suggestions={suggestions} tricksStats={tricksStats} onRefresh={loadAllData} />
           )}
-          {activeTab === 'tricks' && <TricksTab apiBase={API_BASE} tricksStats={tricksStats} />}
           {activeTab === 'performance' && <PerformanceTab apiBase={API_BASE} />}
           {activeTab === 'history' && <HistoryTab apiBase={API_BASE} />}
           {activeTab === 'priceAnalytics' && <PriceAnalytics />}
@@ -511,6 +507,85 @@ function SparklineCard({ label, value, change, positive = true, color = '#3b82f6
       <svg viewBox="0 0 120 35" className="w-full h-10">
         <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
+    </div>
+  );
+}
+
+// ============================================
+// 통합: URL 분석 페이지 (단건 + 배치)
+// ============================================
+function UrlAnalysisPage({ apiBase }) {
+  const [subTab, setSubTab] = useState('single');
+
+  const tabs = [
+    { id: 'single', label: '단건 분석' },
+    { id: 'batch', label: '배치 분석' },
+  ];
+
+  return (
+    <div>
+      <div className="border-b border-slate-200 mb-6">
+        <div className="flex gap-0">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setSubTab(tab.id)}
+              className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
+                subTab === tab.id
+                  ? 'border-blue-500 text-blue-600 font-semibold'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {subTab === 'single' && <AnalyzeTab apiBase={apiBase} />}
+      {subTab === 'batch' && <BatchAnalyzeTab apiBase={apiBase} />}
+    </div>
+  );
+}
+
+// ============================================
+// 통합: 패턴 관리 페이지 (예외/오탐 + 꼼수)
+// ============================================
+function PatternManagementPage({ apiBase, fpStats, suggestions, tricksStats, onRefresh }) {
+  const [subTab, setSubTab] = useState('exception');
+
+  const tabs = [
+    { id: 'exception', label: '예외/오탐', badge: fpStats.summary?.pending || 0 },
+    { id: 'tricks', label: '꼼수 패턴', badge: tricksStats.summary?.total || 0 },
+  ];
+
+  return (
+    <div>
+      <div className="border-b border-slate-200 mb-6">
+        <div className="flex gap-0">
+          {tabs.map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setSubTab(tab.id)}
+              className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors flex items-center gap-2 ${
+                subTab === tab.id
+                  ? 'border-blue-500 text-blue-600 font-semibold'
+                  : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              {tab.label}
+              {tab.badge > 0 && (
+                <span className={`px-1.5 py-0.5 rounded-full text-xs ${
+                  subTab === tab.id ? 'bg-blue-100 text-blue-600' : 'bg-slate-100 text-slate-500'
+                }`}>{tab.badge}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      </div>
+      {subTab === 'exception' && (
+        <FalsePositiveTab apiBase={apiBase} fpStats={fpStats} suggestions={suggestions} onRefresh={onRefresh} />
+      )}
+      {subTab === 'tricks' && <TricksTab apiBase={apiBase} tricksStats={tricksStats} />}
     </div>
   );
 }

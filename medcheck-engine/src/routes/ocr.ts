@@ -88,9 +88,10 @@ async function callGeminiVision(
           data: base64
         }
       };
-    } catch (fetchError: any) {
-      console.error(`[OCR] Image fetch error: ${fetchError.message}`);
-      throw new Error(`이미지 가져오기 실패: ${fetchError.message}`);
+    } catch (fetchError: unknown) {
+      const msg = fetchError instanceof Error ? fetchError.message : String(fetchError);
+      console.error(`[OCR] Image fetch error: ${msg}`);
+      throw new Error(`이미지 가져오기 실패: ${msg}`);
     }
   } else {
     throw new Error('이미지 URL 또는 Base64 데이터가 필요합니다');
@@ -267,13 +268,13 @@ ocr.post('/analyze', async (c) => {
       data: result
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('[OCR] 분석 오류:', error);
     return c.json({
       success: false,
       error: {
         code: 'OCR_ERROR',
-        message: error.message || 'OCR 분석 중 오류가 발생했습니다'
+        message: (error instanceof Error ? error.message : String(error)) || 'OCR 분석 중 오류가 발생했습니다'
       }
     }, 500);
   }
@@ -317,10 +318,10 @@ ocr.post('/extract', async (c) => {
       }
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     return c.json({
       success: false,
-      error: { code: 'OCR_ERROR', message: error.message }
+      error: { code: 'OCR_ERROR', message: error instanceof Error ? error.message : String(error) }
     }, 500);
   }
 });
@@ -359,10 +360,10 @@ ocr.get('/stats', async (c) => {
       success: true,
       data: stats.results
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     return c.json({
       success: false,
-      error: { code: 'DB_ERROR', message: error.message }
+      error: { code: 'DB_ERROR', message: error instanceof Error ? error.message : String(error) }
     }, 500);
   }
 });
@@ -425,10 +426,10 @@ ocr.post('/extract-prices', async (c) => {
       }
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     return c.json({
       success: false,
-      error: { code: 'EXTRACT_ERROR', message: error.message }
+      error: { code: 'EXTRACT_ERROR', message: error instanceof Error ? error.message : String(error) }
     }, 500);
   }
 });
@@ -456,10 +457,10 @@ ocr.post('/parse-prices', async (c) => {
       }
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     return c.json({
       success: false,
-      error: { code: 'PARSE_ERROR', message: error.message }
+      error: { code: 'PARSE_ERROR', message: error instanceof Error ? error.message : String(error) }
     }, 500);
   }
 });

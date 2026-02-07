@@ -109,6 +109,7 @@ export default function MedCheckDashboard() {
     { id: 'performance', name: '성능', icon: '📈' },
     { id: 'history', name: '이력', icon: '📜' },
     { id: 'priceAnalytics', name: '가격분석', icon: '📊' },
+    { id: 'ocr', name: 'OCR 분석', icon: '🖼️' },
   ];
 
   if (loading) {
@@ -288,6 +289,7 @@ export default function MedCheckDashboard() {
           {activeTab === 'performance' && <PerformanceTab apiBase={API_BASE} />}
           {activeTab === 'history' && <HistoryTab apiBase={API_BASE} />}
           {activeTab === 'priceAnalytics' && <PriceAnalytics />}
+          {activeTab === 'ocr' && <OcrTab apiBase={API_BASE} />}
         </main>
       </div>
     </div>
@@ -1518,6 +1520,692 @@ function HistoryTab({ apiBase }) {
               </div>
             </div>
           ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ============================================
+// OCR 분석 탭
+// ============================================
+function OcrTab({ apiBase }) {
+  const [subTab, setSubTab] = useState('results'); // results | analyze | accuracy
+  const [results, setResults] = useState([]);
+  const [pagination, setPagination] = useState({ total: 0, limit: 20, offset: 0, hasMore: false });
+  const [loading, setLoading] = useState(true);
+  const [filterGrade, setFilterGrade] = useState('');
+  const [filterMode, setFilterMode] = useState('');
+  const [selectedResult, setSelectedResult] = useState(null);
+  const [detailData, setDetailData] = useState(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [feedbackMap, setFeedbackMap] = useState({});
+
+  // 분석 폼
+  const [imageUrl, setImageUrl] = useState('');
+  const [analysisMode, setAnalysisMode] = useState('hybrid');
+  const [analyzing, setAnalyzing] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState(null);
+
+  // 정확도
+  const [accuracyStats, setAccuracyStats] = useState(null);
+  const [accuracyPeriod, setAccuracyPeriod] = useState('all');
+  const [fpPatterns, setFpPatterns] = useState([]);
+  const [accuracyLoading, setAccuracyLoading] = useState(false);
+
+  const gradeColors = {
+    'S': { bg: 'bg-cyan-100', text: 'text-cyan-700' },
+    'A': { bg: 'bg-emerald-100', text: 'text-emerald-700' },
+    'B': { bg: 'bg-blue-100', text: 'text-blue-700' },
+    'C': { bg: 'bg-yellow-100', text: 'text-yellow-700' },
+    'D': { bg: 'bg-orange-100', text: 'text-orange-700' },
+    'F': { bg: 'bg-red-100', text: 'text-red-700' }
+  };
+
+  useEffect(() => { loadResults(); }, [filterGrade, filterMode]);
+  useEffect(() => { if (subTab === 'accuracy') loadAccuracy(); }, [subTab, accuracyPeriod]);
+
+  const loadResults = async (offset = 0) => {
+    setLoading(true);
+    try {
+      let url = `${apiBase}/api/ocr/results?limit=20&offset=${offset}`;
+      if (filterGrade) url += `&grade=${filterGrade}`;
+      if (filterMode) url += `&analysisMode=${filterMode}`;
+      const res = await fetch(url);
+      const data = await res.json();
+      if (data.success) {
+        setResults(data.data.results || []);
+        setPagination(data.data.pagination || { total: 0, limit: 20, offset, hasMore: false });
+      }
+    } catch (e) { console.error(e); }
+    setLoading(false);
+  };
+
+  const loadDetail = async (id) => {
+    setSelectedResult(id);
+    setDetailLoading(true);
+    try {
+      const [detailRes, feedbackRes] = await Promise.all([
+        fetch(`${apiBase}/api/ocr/results/${id}`).then(r => r.json()),
+        fetch(`${apiBase}/api/ocr/results/${id}/feedback`).then(r => r.json()),
+      ]);
+      if (detailRes.success) setDetailData(detailRes.data);
+      if (feedbackRes.success) {
+        const map = {};
+        (feedbackRes.data || []).forEach(fb => { map[fb.violation_index] = fb.human_judgment; });
+        setFeedbackMap(map);
+      }
+    } catch (e) { console.error(e); }
+    setDetailLoading(false);
+  };
+
+  const submitFeedback = async (violationIndex, humanJudgment) => {
+    try {
+      const res = await fetch(`${apiBase}/api/ocr/results/${selectedResult}/feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ violationIndex, humanJudgment })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setFeedbackMap(prev => ({ ...prev, [violationIndex]: humanJudgment }));
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  const runAnalysis = async () => {
+    if (!imageUrl.trim()) return;
+    setAnalyzing(true);
+    setAnalysisResult(null);
+    try {
+      const endpoint = analysisMode === 'hybrid' ? '/api/ocr/analyze-hybrid' : '/api/ocr/analyze';
+      const res = await fetch(`${apiBase}${endpoint}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ imageUrl })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAnalysisResult(data.data);
+        loadResults();
+      }
+    } catch (e) { console.error(e); }
+    setAnalyzing(false);
+  };
+
+  const loadAccuracy = async () => {
+    setAccuracyLoading(true);
+    try {
+      const [statsRes, fpRes] = await Promise.all([
+        fetch(`${apiBase}/api/ocr/accuracy/stats?period=${accuracyPeriod}`).then(r => r.json()),
+        fetch(`${apiBase}/api/ocr/accuracy/false-positives?limit=10`).then(r => r.json()),
+      ]);
+      if (statsRes.success) setAccuracyStats(statsRes.data);
+      if (fpRes.success) setFpPatterns(fpRes.data?.byPattern || []);
+    } catch (e) { console.error(e); }
+    setAccuracyLoading(false);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* 서브탭 */}
+      <div className="flex gap-2">
+        {[
+          { id: 'results', label: '분석 결과', icon: '📋' },
+          { id: 'analyze', label: '이미지 분석', icon: '🔍' },
+          { id: 'accuracy', label: 'AI 정확도', icon: '🎯' },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setSubTab(tab.id)}
+            className={`px-5 py-2.5 rounded-xl text-sm font-medium transition-all ${
+              subTab === tab.id
+                ? 'bg-white text-slate-800 shadow-md border border-slate-200'
+                : 'text-slate-500 hover:bg-white/60 hover:text-slate-700'
+            }`}
+          >
+            {tab.icon} {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* ========== 결과 목록 서브탭 ========== */}
+      {subTab === 'results' && (
+        <div className="space-y-4">
+          {/* 필터 */}
+          <div className="flex gap-3 items-center">
+            <select
+              value={filterGrade}
+              onChange={(e) => setFilterGrade(e.target.value)}
+              className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="">전체 등급</option>
+              {['S','A','B','C','D','F'].map(g => <option key={g} value={g}>{g} 등급</option>)}
+            </select>
+            <select
+              value={filterMode}
+              onChange={(e) => setFilterMode(e.target.value)}
+              className="bg-white border border-slate-200 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="">전체 모드</option>
+              <option value="regex">정규식</option>
+              <option value="hybrid">하이브리드</option>
+            </select>
+            <button onClick={() => loadResults()} className="px-4 py-2.5 bg-blue-500 text-white rounded-xl text-sm hover:bg-blue-600 transition-colors">
+              🔄 새로고침
+            </button>
+            <span className="text-sm text-slate-400 ml-auto">총 {pagination.total}건</span>
+          </div>
+
+          <div className="grid grid-cols-5 gap-6">
+            {/* 결과 목록 테이블 (3/5) */}
+            <div className="col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+              {loading ? (
+                <div className="p-12 text-center text-slate-400">로딩 중...</div>
+              ) : results.length === 0 ? (
+                <div className="p-12 text-center text-slate-400">OCR 분석 결과가 없습니다</div>
+              ) : (
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 border-b border-slate-200">
+                    <tr>
+                      <th className="text-left p-4 font-medium text-slate-600">이미지</th>
+                      <th className="text-center p-4 font-medium text-slate-600">등급</th>
+                      <th className="text-center p-4 font-medium text-slate-600">위반수</th>
+                      <th className="text-center p-4 font-medium text-slate-600">모드</th>
+                      <th className="text-left p-4 font-medium text-slate-600">분석일시</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {results.map((row, i) => (
+                      <tr
+                        key={row.id}
+                        onClick={() => loadDetail(row.id)}
+                        className={`cursor-pointer transition-colors ${
+                          selectedResult === row.id ? 'bg-blue-50' :
+                          i % 2 === 0 ? 'bg-white hover:bg-blue-50/50' : 'bg-blue-50/30 hover:bg-blue-50/50'
+                        }`}
+                      >
+                        <td className="p-4">
+                          <span className="text-slate-700 truncate block max-w-[200px]" title={row.image_url}>
+                            {row.image_url === 'base64' ? '(Base64)' : row.image_url?.split('/').pop()?.slice(0, 30) || row.image_url}
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className={`px-2.5 py-1 text-xs font-bold rounded-lg ${gradeColors[row.grade]?.bg || 'bg-slate-100'} ${gradeColors[row.grade]?.text || 'text-slate-600'}`}>
+                            {row.grade || '-'}
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className={`font-bold ${row.violation_count > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                            {row.violation_count}
+                          </span>
+                        </td>
+                        <td className="p-4 text-center">
+                          <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                            row.analysis_mode === 'hybrid' ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-600'
+                          }`}>
+                            {row.analysis_mode || 'regex'}
+                          </span>
+                        </td>
+                        <td className="p-4 text-slate-500 text-xs">
+                          {row.created_at ? new Date(row.created_at).toLocaleString('ko-KR') : '-'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+              {/* 페이지네이션 */}
+              {pagination.total > pagination.limit && (
+                <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
+                  <button
+                    onClick={() => loadResults(Math.max(0, pagination.offset - pagination.limit))}
+                    disabled={pagination.offset === 0}
+                    className="px-3 py-1.5 text-sm bg-slate-100 rounded-lg disabled:opacity-40 hover:bg-slate-200 transition-colors"
+                  >
+                    ← 이전
+                  </button>
+                  <span className="text-sm text-slate-500">
+                    {pagination.offset + 1}-{Math.min(pagination.offset + pagination.limit, pagination.total)} / {pagination.total}
+                  </span>
+                  <button
+                    onClick={() => loadResults(pagination.offset + pagination.limit)}
+                    disabled={!pagination.hasMore}
+                    className="px-3 py-1.5 text-sm bg-slate-100 rounded-lg disabled:opacity-40 hover:bg-slate-200 transition-colors"
+                  >
+                    다음 →
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 상세 패널 (2/5) */}
+            <div className="col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-5 max-h-[700px] overflow-y-auto">
+              {!selectedResult ? (
+                <div className="h-full flex flex-col items-center justify-center text-center py-12">
+                  <div className="text-5xl mb-4">📄</div>
+                  <p className="text-slate-400">목록에서 결과를 선택하세요</p>
+                </div>
+              ) : detailLoading ? (
+                <div className="text-center py-12 text-slate-400">로딩 중...</div>
+              ) : detailData ? (
+                <div className="space-y-4">
+                  {/* 상단 요약 */}
+                  <div className="flex items-center justify-between">
+                    <h4 className="font-bold text-slate-800">분석 상세</h4>
+                    <div className="flex items-center gap-2">
+                      <span className={`px-2.5 py-1 text-xs font-bold rounded-lg ${gradeColors[detailData.grade]?.bg} ${gradeColors[detailData.grade]?.text}`}>
+                        {detailData.grade}
+                      </span>
+                      <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${
+                        detailData.analysis_mode === 'hybrid' ? 'bg-purple-100 text-purple-600' : 'bg-slate-100 text-slate-600'
+                      }`}>
+                        {detailData.analysis_mode || 'regex'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* OCR 텍스트 */}
+                  <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                    <p className="text-xs font-medium text-slate-500 mb-1">추출 텍스트</p>
+                    <p className="text-sm text-slate-700 whitespace-pre-wrap max-h-32 overflow-y-auto">{detailData.extracted_text || '(없음)'}</p>
+                  </div>
+
+                  {/* Hybrid 요약 (hybrid 모드인 경우) */}
+                  {detailData.analysis_mode === 'hybrid' && detailData.hybridVerifications && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-blue-50 rounded-lg p-2 text-center border border-blue-100">
+                        <p className="text-lg font-bold text-blue-700">{detailData.hybridVerifications?.length || 0}</p>
+                        <p className="text-xs text-blue-500">패턴 매칭</p>
+                      </div>
+                      <div className="bg-emerald-50 rounded-lg p-2 text-center border border-emerald-100">
+                        <p className="text-lg font-bold text-emerald-700">{detailData.violation_count || 0}</p>
+                        <p className="text-xs text-emerald-500">AI 확정</p>
+                      </div>
+                      <div className="bg-yellow-50 rounded-lg p-2 text-center border border-yellow-100">
+                        <p className="text-lg font-bold text-yellow-700">{detailData.falsePositiveCandidates?.length || 0}</p>
+                        <p className="text-xs text-yellow-500">오탐 후보</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 위반 항목 */}
+                  <div>
+                    <h5 className="font-semibold text-slate-700 mb-2">위반 항목 ({(detailData.violations || []).length}건)</h5>
+                    {(detailData.violations || []).length === 0 ? (
+                      <p className="text-sm text-slate-400 py-4 text-center">위반 항목 없음</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {(detailData.violations || []).map((v, i) => (
+                          <div key={i} className="p-3 bg-slate-50 rounded-xl border border-slate-100">
+                            <div className="flex items-start gap-2">
+                              <span className={`px-2 py-0.5 text-xs font-bold rounded-lg shrink-0 ${
+                                v.severity === 'critical' ? 'bg-red-100 text-red-600' :
+                                v.severity === 'major' ? 'bg-orange-100 text-orange-600' :
+                                'bg-yellow-100 text-yellow-600'
+                              }`}>{v.severity}</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-slate-800 text-sm">{v.description || v.category}</p>
+                                <p className="text-xs text-slate-500 mt-0.5">
+                                  매칭: "<span className="text-red-500">{v.matchedText}</span>"
+                                </p>
+                                {v.patternId && <p className="text-xs text-slate-400 mt-0.5">{v.patternId} · {v.category}</p>}
+                                {/* AI confidence (hybrid) */}
+                                {v.aiConfidence !== undefined && (
+                                  <div className="flex items-center gap-2 mt-1">
+                                    <div className="flex-1 bg-slate-200 rounded-full h-1.5">
+                                      <div
+                                        className={`h-1.5 rounded-full ${v.aiConfidence >= 70 ? 'bg-emerald-500' : 'bg-yellow-500'}`}
+                                        style={{ width: `${v.aiConfidence}%` }}
+                                      />
+                                    </div>
+                                    <span className={`text-xs font-medium ${v.aiConfidence >= 70 ? 'text-emerald-600' : 'text-yellow-600'}`}>
+                                      {v.aiConfidence}%
+                                    </span>
+                                  </div>
+                                )}
+                                {v.aiReasoning && <p className="text-xs text-slate-400 mt-1 italic">{v.aiReasoning}</p>}
+                              </div>
+                            </div>
+                            {/* 피드백 버튼 */}
+                            <div className="flex gap-1.5 mt-2 ml-8">
+                              {[
+                                { key: 'correct', label: '정확', icon: '✅', active: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+                                { key: 'false_positive', label: '오탐', icon: '❌', active: 'bg-red-100 text-red-700 border-red-200' },
+                                { key: 'missed', label: '누락', icon: '⚠️', active: 'bg-yellow-100 text-yellow-700 border-yellow-200' },
+                              ].map(fb => (
+                                <button
+                                  key={fb.key}
+                                  onClick={() => submitFeedback(i, fb.key)}
+                                  className={`px-2 py-1 text-xs rounded-lg border transition-all ${
+                                    feedbackMap[i] === fb.key
+                                      ? fb.active + ' font-bold'
+                                      : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {fb.icon} {fb.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 오탐 후보 (hybrid) */}
+                  {detailData.analysis_mode === 'hybrid' && (detailData.falsePositiveCandidates || []).length > 0 && (
+                    <div>
+                      <h5 className="font-semibold text-yellow-700 mb-2">오탐 후보 ({detailData.falsePositiveCandidates.length}건)</h5>
+                      <div className="space-y-2">
+                        {detailData.falsePositiveCandidates.map((v, i) => (
+                          <div key={i} className="p-3 bg-yellow-50 rounded-xl border border-yellow-100">
+                            <div className="flex items-start gap-2">
+                              <span className="px-2 py-0.5 text-xs font-bold rounded-lg bg-yellow-200 text-yellow-700 shrink-0">FP?</span>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium text-slate-700 text-sm">{v.description || v.category}</p>
+                                <p className="text-xs text-slate-500 mt-0.5">매칭: "<span className="text-yellow-600">{v.matchedText}</span>"</p>
+                                {v.aiConfidence !== undefined && (
+                                  <span className="text-xs text-yellow-600 font-medium">AI 확신도: {v.aiConfidence}%</span>
+                                )}
+                                {v.aiReasoning && <p className="text-xs text-slate-400 mt-1 italic">{v.aiReasoning}</p>}
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="text-xs text-slate-400 pt-2 border-t border-slate-100">
+                    처리시간: {detailData.processing_time_ms}ms
+                    {detailData.ai_processing_time_ms > 0 && ` (AI: ${detailData.ai_processing_time_ms}ms)`}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ========== 이미지 분석 서브탭 ========== */}
+      {subTab === 'analyze' && (
+        <div className="grid grid-cols-2 gap-6">
+          {/* 입력 폼 */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+            <h3 className="text-lg font-bold text-slate-800 mb-4">🖼️ 이미지 OCR 분석</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">이미지 URL</label>
+                <input
+                  type="text"
+                  value={imageUrl}
+                  onChange={(e) => setImageUrl(e.target.value)}
+                  placeholder="https://example.com/ad-image.jpg"
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-2">분석 모드</label>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setAnalysisMode('regex')}
+                    className={`flex-1 px-4 py-3 rounded-xl text-sm font-medium border transition-all ${
+                      analysisMode === 'regex'
+                        ? 'bg-slate-800 text-white border-slate-800'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    📝 정규식 Only
+                    <p className="text-xs mt-1 opacity-70">빠른 패턴 매칭</p>
+                  </button>
+                  <button
+                    onClick={() => setAnalysisMode('hybrid')}
+                    className={`flex-1 px-4 py-3 rounded-xl text-sm font-medium border transition-all ${
+                      analysisMode === 'hybrid'
+                        ? 'bg-gradient-to-r from-blue-500 to-indigo-600 text-white border-transparent'
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    🤖 하이브리드 (AI)
+                    <p className="text-xs mt-1 opacity-70">정규식 + AI 검증</p>
+                  </button>
+                </div>
+              </div>
+              <button
+                onClick={runAnalysis}
+                disabled={analyzing || !imageUrl.trim()}
+                className="w-full px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-medium shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+              >
+                {analyzing ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                    분석 중...
+                  </span>
+                ) : '분석 실행'}
+              </button>
+            </div>
+          </div>
+
+          {/* 결과 표시 */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+            {analysisResult ? (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="font-bold text-slate-800">분석 결과</h4>
+                  <span className={`px-3 py-1.5 text-sm font-bold rounded-lg ${gradeColors[analysisResult.grade]?.bg} ${gradeColors[analysisResult.grade]?.text}`}>
+                    {analysisResult.grade} 등급
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-slate-50 rounded-xl p-3 text-center border border-slate-100">
+                    <p className={`text-2xl font-bold ${analysisResult.violationCount > 0 ? 'text-red-600' : 'text-emerald-600'}`}>
+                      {analysisResult.violationCount}
+                    </p>
+                    <p className="text-xs text-slate-500">위반 항목</p>
+                  </div>
+                  <div className="bg-slate-50 rounded-xl p-3 text-center border border-slate-100">
+                    <p className="text-2xl font-bold text-slate-700">{analysisResult.processingTimeMs}ms</p>
+                    <p className="text-xs text-slate-500">처리 시간</p>
+                  </div>
+                </div>
+
+                {analysisResult.analysisMode === 'hybrid' && analysisResult.hybridAnalysis && (
+                  <div className="bg-purple-50 rounded-xl p-3 border border-purple-100">
+                    <p className="text-xs font-medium text-purple-600 mb-1">AI 검증 결과</p>
+                    <div className="flex justify-between text-sm">
+                      <span>패턴 매칭: <b>{analysisResult.hybridAnalysis.totalPatternMatches}</b></span>
+                      <span>AI 확정: <b className="text-emerald-600">{analysisResult.hybridAnalysis.confirmedCount}</b></span>
+                      <span>오탐 후보: <b className="text-yellow-600">{analysisResult.hybridAnalysis.falsePositiveCandidateCount}</b></span>
+                    </div>
+                  </div>
+                )}
+
+                {/* OCR 텍스트 */}
+                <div className="bg-slate-50 rounded-xl p-3 border border-slate-100">
+                  <p className="text-xs font-medium text-slate-500 mb-1">추출 텍스트</p>
+                  <p className="text-sm text-slate-700 whitespace-pre-wrap max-h-24 overflow-y-auto">{analysisResult.extractedText || '(없음)'}</p>
+                </div>
+
+                {/* 위반 목록 */}
+                {(analysisResult.violations || []).length > 0 && (
+                  <div className="space-y-2 max-h-48 overflow-y-auto">
+                    {analysisResult.violations.map((v, i) => (
+                      <div key={i} className="p-2.5 bg-red-50 rounded-lg border border-red-100 text-sm">
+                        <span className={`px-1.5 py-0.5 text-xs font-bold rounded ${
+                          v.severity === 'critical' ? 'bg-red-200 text-red-700' : 'bg-orange-200 text-orange-700'
+                        }`}>{v.severity}</span>
+                        <span className="ml-2 text-slate-700">{v.description || v.category}</span>
+                        <p className="text-xs text-slate-500 mt-1">"{v.matchedText}"</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="h-full flex flex-col items-center justify-center text-center py-12">
+                <div className="text-5xl mb-4">🖼️</div>
+                <p className="text-slate-400">이미지 URL을 입력하고<br/>분석 버튼을 누르세요</p>
+                <p className="text-xs text-slate-300 mt-2">Gemini OCR → 패턴 매칭 → AI 검증</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========== AI 정확도 서브탭 ========== */}
+      {subTab === 'accuracy' && (
+        <div className="space-y-6">
+          {/* 기간 필터 */}
+          <div className="flex gap-2">
+            {[
+              { id: 'all', label: '전체' },
+              { id: '30d', label: '30일' },
+              { id: '7d', label: '7일' },
+            ].map(p => (
+              <button
+                key={p.id}
+                onClick={() => setAccuracyPeriod(p.id)}
+                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                  accuracyPeriod === p.id
+                    ? 'bg-blue-500 text-white'
+                    : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          {accuracyLoading ? (
+            <div className="text-center py-12 text-slate-400">로딩 중...</div>
+          ) : accuracyStats ? (
+            <>
+              {/* 전체 정확도 큰 카드 */}
+              <div className="grid grid-cols-4 gap-4">
+                <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm text-center col-span-1">
+                  <p className={`text-5xl font-bold ${
+                    accuracyStats.overall.accuracy >= 80 ? 'text-emerald-600' :
+                    accuracyStats.overall.accuracy >= 60 ? 'text-yellow-600' : 'text-red-600'
+                  }`}>
+                    {accuracyStats.overall.accuracy}%
+                  </p>
+                  <p className="text-slate-500 mt-2">전체 정확도</p>
+                  <p className="text-xs text-slate-400 mt-1">{accuracyStats.overall.total}건 피드백</p>
+                </div>
+                <StatCard title="정탐 (Correct)" value={accuracyStats.overall.correctCount} color="emerald" />
+                <StatCard title="오탐 (FP)" value={accuracyStats.overall.falsePositiveCount} color="red" />
+                <StatCard title="누락 (Missed)" value={accuracyStats.overall.missedCount} color="yellow" />
+              </div>
+
+              {/* 모드별 비교 */}
+              {accuracyStats.byMode.length > 0 && (
+                <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                  <h4 className="font-bold text-slate-800 mb-4">📊 분석 모드별 정확도 비교</h4>
+                  <div className="grid grid-cols-2 gap-4">
+                    {accuracyStats.byMode.map(mode => (
+                      <div key={mode.mode} className={`rounded-xl p-4 border ${
+                        mode.mode === 'hybrid' ? 'bg-purple-50 border-purple-100' : 'bg-slate-50 border-slate-100'
+                      }`}>
+                        <div className="flex items-center justify-between mb-3">
+                          <span className={`px-2.5 py-1 text-xs font-bold rounded-lg ${
+                            mode.mode === 'hybrid' ? 'bg-purple-200 text-purple-700' : 'bg-slate-200 text-slate-700'
+                          }`}>
+                            {mode.mode === 'hybrid' ? '🤖 하이브리드' : '📝 정규식'}
+                          </span>
+                          <span className="text-2xl font-bold text-slate-800">{mode.accuracy}%</span>
+                        </div>
+                        <div className="w-full bg-slate-200 rounded-full h-2.5">
+                          <div
+                            className={`h-2.5 rounded-full ${mode.mode === 'hybrid' ? 'bg-purple-500' : 'bg-slate-500'}`}
+                            style={{ width: `${mode.accuracy}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between mt-2 text-xs text-slate-500">
+                          <span>정탐 {mode.correctCount}</span>
+                          <span>오탐 {mode.falsePositiveCount}</span>
+                          <span>총 {mode.total}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* FP 패턴 Top 10 */}
+              <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                <div className="p-4 border-b border-slate-100">
+                  <h4 className="font-bold text-slate-800">🚨 오탐 빈도 Top 패턴</h4>
+                </div>
+                {fpPatterns.length === 0 ? (
+                  <div className="p-8 text-center text-slate-400">오탐 데이터가 없습니다</div>
+                ) : (
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="text-left p-4 font-medium text-slate-600">#</th>
+                        <th className="text-left p-4 font-medium text-slate-600">패턴 ID</th>
+                        <th className="text-left p-4 font-medium text-slate-600">카테고리</th>
+                        <th className="text-center p-4 font-medium text-slate-600">FP 횟수</th>
+                        <th className="text-left p-4 font-medium text-slate-600">매칭 텍스트 샘플</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {fpPatterns.map((row, i) => (
+                        <tr key={row.pattern_id} className={i % 2 === 0 ? 'bg-white' : 'bg-red-50/30'}>
+                          <td className="p-4 text-slate-400">{i + 1}</td>
+                          <td className="p-4 font-mono text-slate-700 text-xs">{row.pattern_id}</td>
+                          <td className="p-4 text-slate-600">{row.category || '-'}</td>
+                          <td className="p-4 text-center">
+                            <span className="px-2.5 py-1 bg-red-100 text-red-600 text-xs font-bold rounded-lg">{row.fp_count}</span>
+                          </td>
+                          <td className="p-4 text-slate-500 text-xs truncate max-w-[200px]">{row.sample_texts || '-'}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              {/* 카테고리별 정확도 */}
+              {accuracyStats.byCategory.length > 0 && (
+                <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+                  <div className="p-4 border-b border-slate-100">
+                    <h4 className="font-bold text-slate-800">📂 카테고리별 정확도</h4>
+                  </div>
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 border-b border-slate-200">
+                      <tr>
+                        <th className="text-left p-4 font-medium text-slate-600">카테고리</th>
+                        <th className="text-center p-4 font-medium text-slate-600">정확도</th>
+                        <th className="text-center p-4 font-medium text-slate-600">정탐</th>
+                        <th className="text-center p-4 font-medium text-slate-600">오탐</th>
+                        <th className="text-center p-4 font-medium text-slate-600">총 건수</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {accuracyStats.byCategory.map((row, i) => (
+                        <tr key={row.category} className={i % 2 === 0 ? 'bg-white' : 'bg-blue-50/30'}>
+                          <td className="p-4 text-slate-700 font-medium">{row.category}</td>
+                          <td className="p-4 text-center">
+                            <span className={`font-bold ${row.accuracy >= 80 ? 'text-emerald-600' : row.accuracy >= 60 ? 'text-yellow-600' : 'text-red-600'}`}>
+                              {row.accuracy}%
+                            </span>
+                          </td>
+                          <td className="p-4 text-center text-emerald-600">{row.correctCount}</td>
+                          <td className="p-4 text-center text-red-600">{row.falsePositiveCount}</td>
+                          <td className="p-4 text-center text-slate-500">{row.total}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 text-center text-slate-400">정확도 데이터가 없습니다</div>
+          )}
         </div>
       )}
     </div>

@@ -342,8 +342,9 @@ ocrPipelineRoutes.get('/results', async (c) => {
     const offset = parseInt(c.req.query('offset') || '0');
     const grade = c.req.query('grade');
     const minViolations = c.req.query('minViolations');
+    const analysisMode = c.req.query('analysisMode');
 
-    let query = 'SELECT id, image_url, ocr_confidence, violation_count, grade, total_score, processing_time_ms, created_at FROM ocr_results';
+    let query = 'SELECT id, image_url, ocr_confidence, violation_count, grade, total_score, analysis_mode, processing_time_ms, created_at FROM ocr_results';
     const conditions: string[] = [];
     const params: any[] = [];
 
@@ -355,6 +356,11 @@ ocrPipelineRoutes.get('/results', async (c) => {
     if (minViolations) {
       conditions.push('violation_count >= ?');
       params.push(parseInt(minViolations));
+    }
+
+    if (analysisMode) {
+      conditions.push('analysis_mode = ?');
+      params.push(analysisMode);
     }
 
     if (conditions.length > 0) {
@@ -448,6 +454,256 @@ ocrPipelineRoutes.get('/results/:id', async (c) => {
     return c.json({
       success: true,
       data
+    });
+  } catch (error: unknown) {
+    return c.json({
+      success: false,
+      error: { code: 'DB_ERROR', message: error instanceof Error ? error.message : String(error) }
+    }, 500);
+  }
+});
+
+// ============================================
+// 피드백 & 정확도 API
+// ============================================
+
+/**
+ * POST /api/ocr/results/:id/feedback - 위반 항목 피드백
+ * 한 위반 항목당 하나의 피드백만 허용 (중복 시 업데이트)
+ */
+ocrPipelineRoutes.post('/results/:id/feedback', async (c) => {
+  try {
+    const ocrResultId = c.req.param('id');
+    const body = await c.req.json() as {
+      violationIndex: number;
+      humanJudgment: 'correct' | 'false_positive' | 'missed';
+      comment?: string;
+    };
+
+    const { violationIndex, humanJudgment, comment } = body;
+
+    if (violationIndex === undefined || !humanJudgment) {
+      return c.json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'violationIndex와 humanJudgment가 필요합니다' }
+      }, 400);
+    }
+
+    if (!['correct', 'false_positive', 'missed'].includes(humanJudgment)) {
+      return c.json({
+        success: false,
+        error: { code: 'INVALID_REQUEST', message: 'humanJudgment는 correct, false_positive, missed 중 하나여야 합니다' }
+      }, 400);
+    }
+
+    // OCR 결과 조회 (위반 항목 정보 추출)
+    const ocrResult = await c.env.DB.prepare(
+      'SELECT violations_json, analysis_mode FROM ocr_results WHERE id = ?'
+    ).bind(ocrResultId).first<{ violations_json: string; analysis_mode: string }>();
+
+    if (!ocrResult) {
+      return c.json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: 'OCR 결과를 찾을 수 없습니다' }
+      }, 404);
+    }
+
+    let patternId = '';
+    let matchedText = '';
+    let category = '';
+    try {
+      const violations = JSON.parse(ocrResult.violations_json || '[]');
+      const v = violations[violationIndex];
+      if (v) {
+        patternId = v.patternId || '';
+        matchedText = v.matchedText || '';
+        category = v.category || '';
+      }
+    } catch { /* ignore parse error */ }
+
+    const feedbackId = generateId().replace('ocr_', 'fb_');
+
+    // UPSERT: 중복 시 업데이트
+    await c.env.DB.prepare(`
+      INSERT INTO ocr_feedback (
+        id, ocr_result_id, violation_index, pattern_id, matched_text,
+        category, analysis_mode, human_judgment, comment, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+      ON CONFLICT(ocr_result_id, violation_index) DO UPDATE SET
+        human_judgment = excluded.human_judgment,
+        comment = excluded.comment,
+        updated_at = datetime('now')
+    `).bind(
+      feedbackId,
+      ocrResultId,
+      violationIndex,
+      patternId,
+      matchedText,
+      category,
+      ocrResult.analysis_mode || 'regex',
+      humanJudgment,
+      comment || null
+    ).run();
+
+    return c.json({ success: true, data: { id: feedbackId, ocrResultId, violationIndex, humanJudgment } });
+  } catch (error: unknown) {
+    return c.json({
+      success: false,
+      error: { code: 'FEEDBACK_ERROR', message: error instanceof Error ? error.message : String(error) }
+    }, 500);
+  }
+});
+
+/**
+ * GET /api/ocr/results/:id/feedback - 특정 OCR 결과의 피드백 목록
+ */
+ocrPipelineRoutes.get('/results/:id/feedback', async (c) => {
+  try {
+    const ocrResultId = c.req.param('id');
+    const result = await c.env.DB.prepare(
+      'SELECT * FROM ocr_feedback WHERE ocr_result_id = ? ORDER BY violation_index'
+    ).bind(ocrResultId).all();
+
+    return c.json({ success: true, data: result.results || [] });
+  } catch (error: unknown) {
+    return c.json({
+      success: false,
+      error: { code: 'DB_ERROR', message: error instanceof Error ? error.message : String(error) }
+    }, 500);
+  }
+});
+
+/**
+ * GET /api/ocr/accuracy/stats - AI 정확도 통계
+ * ?period=7d|30d|all (기본: all)
+ */
+ocrPipelineRoutes.get('/accuracy/stats', async (c) => {
+  try {
+    const period = c.req.query('period') || 'all';
+    let dateFilter = '';
+    if (period === '7d') {
+      dateFilter = "AND f.created_at >= datetime('now', '-7 days')";
+    } else if (period === '30d') {
+      dateFilter = "AND f.created_at >= datetime('now', '-30 days')";
+    }
+
+    // 전체 정확도
+    const totalRes = await c.env.DB.prepare(`
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN human_judgment = 'correct' THEN 1 ELSE 0 END) as correct_count,
+        SUM(CASE WHEN human_judgment = 'false_positive' THEN 1 ELSE 0 END) as false_positive_count,
+        SUM(CASE WHEN human_judgment = 'missed' THEN 1 ELSE 0 END) as missed_count
+      FROM ocr_feedback f
+      WHERE 1=1 ${dateFilter}
+    `).first<{ total: number; correct_count: number; false_positive_count: number; missed_count: number }>();
+
+    const total = totalRes?.total || 0;
+    const correctCount = totalRes?.correct_count || 0;
+    const overallAccuracy = total > 0 ? Math.round((correctCount / total) * 10000) / 100 : 0;
+
+    // 모드별 정확도 (regex vs hybrid)
+    const modeRes = await c.env.DB.prepare(`
+      SELECT
+        analysis_mode,
+        COUNT(*) as total,
+        SUM(CASE WHEN human_judgment = 'correct' THEN 1 ELSE 0 END) as correct_count,
+        SUM(CASE WHEN human_judgment = 'false_positive' THEN 1 ELSE 0 END) as false_positive_count
+      FROM ocr_feedback f
+      WHERE 1=1 ${dateFilter}
+      GROUP BY analysis_mode
+    `).all();
+
+    const byMode = (modeRes.results || []).map((row: any) => ({
+      mode: row.analysis_mode,
+      total: row.total,
+      correctCount: row.correct_count,
+      falsePositiveCount: row.false_positive_count,
+      accuracy: row.total > 0 ? Math.round((row.correct_count / row.total) * 10000) / 100 : 0,
+    }));
+
+    // 카테고리별 정확도
+    const categoryRes = await c.env.DB.prepare(`
+      SELECT
+        category,
+        COUNT(*) as total,
+        SUM(CASE WHEN human_judgment = 'correct' THEN 1 ELSE 0 END) as correct_count,
+        SUM(CASE WHEN human_judgment = 'false_positive' THEN 1 ELSE 0 END) as false_positive_count
+      FROM ocr_feedback f
+      WHERE category != '' AND category IS NOT NULL ${dateFilter}
+      GROUP BY category
+      ORDER BY total DESC
+    `).all();
+
+    const byCategory = (categoryRes.results || []).map((row: any) => ({
+      category: row.category,
+      total: row.total,
+      correctCount: row.correct_count,
+      falsePositiveCount: row.false_positive_count,
+      accuracy: row.total > 0 ? Math.round((row.correct_count / row.total) * 10000) / 100 : 0,
+    }));
+
+    return c.json({
+      success: true,
+      data: {
+        period,
+        overall: {
+          total,
+          correctCount,
+          falsePositiveCount: totalRes?.false_positive_count || 0,
+          missedCount: totalRes?.missed_count || 0,
+          accuracy: overallAccuracy,
+        },
+        byMode,
+        byCategory,
+      }
+    });
+  } catch (error: unknown) {
+    return c.json({
+      success: false,
+      error: { code: 'STATS_ERROR', message: error instanceof Error ? error.message : String(error) }
+    }, 500);
+  }
+});
+
+/**
+ * GET /api/ocr/accuracy/false-positives - 오탐 판정 항목 목록
+ * 패턴별 false positive 빈도 순 정렬
+ */
+ocrPipelineRoutes.get('/accuracy/false-positives', async (c) => {
+  try {
+    const limit = Math.min(parseInt(c.req.query('limit') || '50'), 100);
+
+    // 패턴별 FP 빈도
+    const fpByPattern = await c.env.DB.prepare(`
+      SELECT
+        pattern_id,
+        category,
+        COUNT(*) as fp_count,
+        GROUP_CONCAT(matched_text, ' | ') as sample_texts
+      FROM ocr_feedback
+      WHERE human_judgment = 'false_positive' AND pattern_id != '' AND pattern_id IS NOT NULL
+      GROUP BY pattern_id
+      ORDER BY fp_count DESC
+      LIMIT ?
+    `).bind(limit).all();
+
+    // 개별 FP 항목
+    const fpItems = await c.env.DB.prepare(`
+      SELECT f.*, r.image_url, r.analysis_mode as result_mode
+      FROM ocr_feedback f
+      LEFT JOIN ocr_results r ON f.ocr_result_id = r.id
+      WHERE f.human_judgment = 'false_positive'
+      ORDER BY f.created_at DESC
+      LIMIT ?
+    `).bind(limit).all();
+
+    return c.json({
+      success: true,
+      data: {
+        byPattern: fpByPattern.results || [],
+        items: fpItems.results || [],
+      }
     });
   } catch (error: unknown) {
     return c.json({

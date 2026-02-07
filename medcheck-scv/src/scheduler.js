@@ -45,6 +45,9 @@ let runningJobs = [];
 let cronJobs = [];
 let pollTimer = null;
 let heartbeatTimer = null;
+let cancelCheckTimer = null;
+const childProcesses = new Map(); // jobId → child process
+const cancelledJobIds = new Set(); // 취소 요청된 작업 ID
 
 // ============================================
 // 유틸리티
@@ -232,6 +235,9 @@ async function executeJob(job) {
       { cwd: SCV_DIR, silent: true }
     );
 
+    // child process 추적 (취소용)
+    childProcesses.set(id, child);
+
     let stdout = '';
     let stderr = '';
 
@@ -239,6 +245,16 @@ async function executeJob(job) {
     if (child.stderr) child.stderr.on('data', d => { stderr += d.toString(); });
 
     child.on('exit', async (code) => {
+      childProcesses.delete(id);
+
+      if (cancelledJobIds.has(id)) {
+        cancelledJobIds.delete(id);
+        await finishJob(job, logId, startTime, { error: '사용자에 의해 취소됨' });
+        log('info', `작업 취소 완료: ${id}`);
+        resolve();
+        return;
+      }
+
       if (code === 0) {
         const result = parseResult(stdout);
         await finishJob(job, logId, startTime, { success: true, ...result });
@@ -389,6 +405,33 @@ async function pollTriggers() {
 }
 
 // ============================================
+// 취소 작업 확인 (10초)
+// ============================================
+
+async function checkCancelledJobs() {
+  if (!isRunning || childProcesses.size === 0) return;
+
+  try {
+    const res = await axios.get(`${API_BASE}/api/crawler/jobs/running`, { timeout: 10000 });
+    if (res.data?.success) {
+      const jobs = res.data.data || [];
+      for (const job of jobs) {
+        if (job.status === 'cancel_requested' && childProcesses.has(job.job_id)) {
+          log('info', `작업 취소 요청 감지: ${job.job_id}`);
+          cancelledJobIds.add(job.job_id);
+          const child = childProcesses.get(job.job_id);
+          if (child) {
+            try { child.kill(); } catch (e) { /* ignore */ }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    log('warn', '취소 작업 확인 실패', { error: e.message });
+  }
+}
+
+// ============================================
 // 스케줄 크론
 // ============================================
 
@@ -457,6 +500,9 @@ async function startScheduler(options = {}) {
   // 트리거 폴링 시작
   pollTimer = setInterval(pollTriggers, POLL_INTERVAL);
 
+  // 취소 작업 확인 (10초 간격)
+  cancelCheckTimer = setInterval(checkCancelledJobs, 10000);
+
   // graceful shutdown 대비 stop 파일 감시 (2초 간격)
   const stopWatcher = setInterval(() => {
     if (fs.existsSync(STOP_FILE)) {
@@ -502,6 +548,7 @@ async function stopScheduler() {
   // 타이머 정리
   if (pollTimer) clearInterval(pollTimer);
   if (heartbeatTimer) clearInterval(heartbeatTimer);
+  if (cancelCheckTimer) clearInterval(cancelCheckTimer);
 
   // 오프라인 하트비트 (isOnline: false 명시)
   log('info', '오프라인 하트비트 전송 중...');

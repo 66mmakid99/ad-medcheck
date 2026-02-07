@@ -156,6 +156,46 @@ crawlerRoutes.post('/triggers/:id/complete', async (c) => {
 });
 
 // ============================================
+// POST /jobs/cancel - 실행 중인 작업 취소
+// ============================================
+crawlerRoutes.post('/jobs/cancel', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { jobId } = body;
+
+    if (!jobId) return c.json({ success: false, error: 'jobId required' }, 400);
+
+    // crawl_logs에서 running → cancel_requested
+    const result = await c.env.DB.prepare(`
+      UPDATE crawl_logs SET status = 'cancel_requested'
+      WHERE job_id = ? AND status = 'running'
+    `).bind(jobId).run();
+
+    return c.json({
+      success: true,
+      data: { jobId, cancelled: result.meta.changes > 0, message: result.meta.changes > 0 ? '취소 요청됨 (최대 30초 후 반영)' : '실행 중인 작업을 찾을 수 없습니다' }
+    });
+  } catch (e: unknown) {
+    return handleApiError(c, e);
+  }
+});
+
+// ============================================
+// GET /jobs/running - 실행 중인 작업 목록
+// ============================================
+crawlerRoutes.get('/jobs/running', async (c) => {
+  try {
+    const results = await c.env.DB.prepare(
+      `SELECT * FROM crawl_logs WHERE status IN ('running', 'cancel_requested') ORDER BY started_at DESC`
+    ).all();
+
+    return c.json({ success: true, data: results.results });
+  } catch (e: unknown) {
+    return handleApiError(c, e);
+  }
+});
+
+// ============================================
 // POST /shutdown - 스케줄러 종료 요청
 // ============================================
 crawlerRoutes.post('/shutdown', async (c) => {

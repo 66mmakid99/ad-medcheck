@@ -2374,6 +2374,16 @@ function CrawlerTab({ apiBase }) {
   const [triggering, setTriggering] = useState(false);
   const [triggerResult, setTriggerResult] = useState(null);
   const [stopping, setStopping] = useState(false);
+  const [runningJobs, setRunningJobs] = useState([]);
+  const [cancellingJob, setCancellingJob] = useState(null);
+
+  const loadRunningJobs = async () => {
+    try {
+      const res = await fetch(`${apiBase}/api/crawler/jobs/running`);
+      const d = await res.json();
+      if (d.success) setRunningJobs(d.data || []);
+    } catch (e) { /* ignore */ }
+  };
 
   const loadStatus = async () => {
     try {
@@ -2394,11 +2404,11 @@ function CrawlerTab({ apiBase }) {
   useEffect(() => {
     const load = async () => {
       setLoading(true);
-      await Promise.all([loadStatus(), loadLogs()]);
+      await Promise.all([loadStatus(), loadLogs(), loadRunningJobs()]);
       setLoading(false);
     };
     load();
-    const interval = setInterval(() => { loadStatus(); loadLogs(); }, 30000);
+    const interval = setInterval(() => { loadStatus(); loadLogs(); loadRunningJobs(); }, 15000);
     return () => clearInterval(interval);
   }, []);
 
@@ -2443,6 +2453,26 @@ function CrawlerTab({ apiBase }) {
     setStopping(false);
   };
 
+  const handleCancelJob = async (jobId) => {
+    if (!confirm('이 작업을 중지하시겠습니까?')) return;
+    setCancellingJob(jobId);
+    try {
+      const res = await fetch(`${apiBase}/api/crawler/jobs/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ jobId }),
+      });
+      const d = await res.json();
+      if (d.success) {
+        setTriggerResult({ type: 'success', message: d.data.message });
+        setTimeout(() => { loadRunningJobs(); loadLogs(); loadStatus(); }, 3000);
+      }
+    } catch (e) {
+      setTriggerResult({ type: 'error', message: '작업 중지 요청 실패' });
+    }
+    setCancellingJob(null);
+  };
+
   const formatDuration = (sec) => {
     if (!sec) return '-';
     if (sec < 60) return `${sec}초`;
@@ -2460,8 +2490,9 @@ function CrawlerTab({ apiBase }) {
       running: 'bg-blue-100 text-blue-700',
       completed: 'bg-emerald-100 text-emerald-700',
       failed: 'bg-red-100 text-red-700',
+      cancel_requested: 'bg-orange-100 text-orange-700',
     };
-    const labelMap = { running: '실행 중', completed: '완료', failed: '실패' };
+    const labelMap = { running: '실행 중', completed: '완료', failed: '실패', cancel_requested: '취소 중' };
     return <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${map[s] || 'bg-slate-100 text-slate-600'}`}>{labelMap[s] || s}</span>;
   };
 
@@ -2485,30 +2516,63 @@ function CrawlerTab({ apiBase }) {
 
   return (
     <div className="space-y-6">
-      {/* 상태 카드 */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-slate-500">스케줄러</span>
-            <div className={`w-3 h-3 rounded-full ${isOnline ? 'bg-emerald-400 animate-pulse' : 'bg-slate-300'}`} />
+      {/* 스케줄러 ON/OFF 토글 */}
+      <div className={`rounded-2xl p-6 border shadow-sm flex items-center justify-between ${
+        isOnline
+          ? 'bg-gradient-to-r from-emerald-50 to-white border-emerald-200'
+          : 'bg-gradient-to-r from-slate-100 to-white border-slate-200'
+      }`}>
+        <div className="flex items-center gap-4">
+          <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-2xl ${
+            isOnline ? 'bg-emerald-100' : 'bg-slate-200'
+          }`}>
+            {isOnline ? '🟢' : '⚫'}
           </div>
-          <div className={`text-xl font-bold ${isOnline ? 'text-emerald-600' : 'text-slate-400'}`}>
-            {isOnline ? '온라인' : '오프라인'}
+          <div>
+            <div className="flex items-center gap-2">
+              <h2 className={`text-lg font-bold ${isOnline ? 'text-emerald-700' : 'text-slate-500'}`}>
+                스케줄러 {isOnline ? 'ON' : 'OFF'}
+              </h2>
+              {isOnline && <div className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />}
+            </div>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {isOnline
+                ? `PID ${status?.schedulerInfo?.pid || '-'} · 다음 실행: ${formatTime(status?.schedulerInfo?.nextScheduledRun)}`
+                : '로컬 스케줄러가 실행되고 있지 않습니다'}
+            </p>
+            {status?.lastHeartbeat && (
+              <p className="text-xs text-slate-400 mt-0.5">마지막 응답: {formatTime(status.lastHeartbeat)}</p>
+            )}
           </div>
-          {isOnline && (
+        </div>
+        <div className="flex items-center gap-3">
+          {isOnline ? (
             <button
               onClick={handleShutdown}
               disabled={stopping}
-              className="mt-2 px-3 py-1 text-xs bg-red-50 hover:bg-red-100 text-red-600 rounded-lg transition-colors"
+              className="px-6 py-2.5 rounded-xl text-sm font-semibold bg-red-500 hover:bg-red-600 text-white transition-colors shadow-sm disabled:opacity-50"
             >
-              {stopping ? '요청 중...' : '중지'}
+              {stopping ? '종료 요청 중...' : '스케줄러 끄기'}
             </button>
-          )}
-          {status?.lastHeartbeat && (
-            <div className="text-xs text-slate-400 mt-1">마지막 응답: {formatTime(status.lastHeartbeat)}</div>
+          ) : (
+            <div className="text-right">
+              <div className="text-xs text-slate-400 bg-slate-50 border border-slate-200 rounded-lg px-4 py-2 font-mono">
+                npm run scheduler:start
+              </div>
+              <p className="text-xs text-slate-400 mt-1">로컬 터미널에서 실행</p>
+            </div>
           )}
         </div>
+      </div>
 
+      {triggerResult && (
+        <div className={`px-4 py-3 rounded-xl text-sm ${triggerResult.type === 'success' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+          {triggerResult.message}
+        </div>
+      )}
+
+      {/* 상태 카드 */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
           <div className="text-sm text-slate-500 mb-2">마지막 크롤링</div>
           <div className="text-xl font-bold text-slate-700">
@@ -2531,6 +2595,47 @@ function CrawlerTab({ apiBase }) {
           <div className="text-xs text-slate-400 mt-1">분석 병원 {today.totalHospitals || 0}개</div>
         </div>
       </div>
+
+      {/* 실행 중인 작업 */}
+      {runningJobs.length > 0 && (
+        <div className="bg-white rounded-2xl border border-blue-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-4 border-b border-blue-100 bg-blue-50/50">
+            <h3 className="text-sm font-semibold text-blue-700 flex items-center gap-2">
+              <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse" />
+              실행 중인 작업 ({runningJobs.length})
+            </h3>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {runningJobs.map((job) => (
+              <div key={job.id} className="px-6 py-4 flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="w-8 h-8 bg-blue-100 rounded-lg flex items-center justify-center">
+                    <div className="w-4 h-4 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-medium text-slate-700">{job.job_id}</div>
+                    <div className="text-xs text-slate-400 mt-0.5">
+                      {job.region || '-'} · {job.type === 'scheduled' ? '예약' : '수동'} · 시작: {formatTime(job.started_at)}
+                    </div>
+                  </div>
+                </div>
+                <div className="flex items-center gap-3">
+                  {statusBadge(job.status)}
+                  {job.status === 'running' && (
+                    <button
+                      onClick={() => handleCancelJob(job.job_id)}
+                      disabled={cancellingJob === job.job_id}
+                      className="px-4 py-1.5 rounded-lg text-xs font-medium bg-red-50 text-red-600 hover:bg-red-100 border border-red-200 transition-colors disabled:opacity-50"
+                    >
+                      {cancellingJob === job.job_id ? '중지 요청 중...' : '중지'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* 수동 실행 + 스케줄러 정보 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -2562,14 +2667,6 @@ function CrawlerTab({ apiBase }) {
               {triggering ? '요청 중...' : '크롤링 시작'}
             </button>
           </div>
-          {!isOnline && (
-            <p className="text-xs text-amber-600 mt-2">스케줄러가 오프라인입니다. 로컬에서 스케줄러를 시작해주세요.</p>
-          )}
-          {triggerResult && (
-            <p className={`text-xs mt-2 ${triggerResult.type === 'success' ? 'text-emerald-600' : 'text-red-600'}`}>
-              {triggerResult.message}
-            </p>
-          )}
         </div>
 
         <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">

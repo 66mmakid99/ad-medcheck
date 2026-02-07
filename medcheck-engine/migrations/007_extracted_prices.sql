@@ -96,40 +96,7 @@ CREATE INDEX IF NOT EXISTS idx_image_violations_ocr ON image_violations(ocr_resu
 CREATE INDEX IF NOT EXISTS idx_image_violations_type ON image_violations(violation_type);
 CREATE INDEX IF NOT EXISTS idx_image_violations_severity ON image_violations(severity);
 
--- 트리거: extracted_prices 업데이트 시 updated_at 자동 갱신
-CREATE TRIGGER IF NOT EXISTS trigger_extracted_prices_updated
-AFTER UPDATE ON extracted_prices
-FOR EACH ROW
-BEGIN
-  UPDATE extracted_prices SET updated_at = datetime('now') WHERE id = NEW.id;
-END;
-
--- 뷰: 병원별 추출 가격 요약
-CREATE VIEW IF NOT EXISTS v_hospital_extracted_prices AS
-SELECT
-  h.id AS hospital_id,
-  h.name AS hospital_name,
-  COUNT(DISTINCT ep.id) AS total_prices,
-  COUNT(DISTINCT CASE WHEN ep.validation_status = 'VIOLATION' THEN ep.id END) AS violation_count,
-  AVG(ep.risk_score) AS avg_risk_score,
-  MIN(ep.price) AS min_price,
-  MAX(ep.price) AS max_price,
-  GROUP_CONCAT(DISTINCT ep.procedure_name) AS procedures
-FROM hospitals h
-LEFT JOIN extracted_prices ep ON h.id = ep.hospital_id
-GROUP BY h.id, h.name;
-
--- 뷰: 시술별 가격 비교
-CREATE VIEW IF NOT EXISTS v_procedure_price_comparison AS
-SELECT
-  ep.normalized_procedure,
-  COUNT(*) AS sample_count,
-  AVG(ep.price) AS avg_price,
-  MIN(ep.price) AS min_price,
-  MAX(ep.price) AS max_price,
-  AVG(ep.discount_rate) AS avg_discount_rate,
-  COUNT(CASE WHEN ep.validation_status = 'VIOLATION' THEN 1 END) AS violation_count
-FROM extracted_prices ep
-WHERE ep.normalized_procedure IS NOT NULL
-GROUP BY ep.normalized_procedure
-HAVING COUNT(*) >= 3;
+-- [D1 호환성] TRIGGER 제거됨 - 애플리케이션 레벨에서 updated_at 직접 설정
+-- [D1 호환성] VIEW 제거됨 - 애플리케이션 레벨 쿼리로 대체
+-- v_hospital_extracted_prices: API에서 JOIN 쿼리 직접 실행
+-- v_procedure_price_comparison: API에서 GROUP BY 쿼리 직접 실행

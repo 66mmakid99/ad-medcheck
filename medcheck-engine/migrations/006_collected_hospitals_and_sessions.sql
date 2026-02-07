@@ -82,26 +82,6 @@ CREATE INDEX IF NOT EXISTS idx_analysis_session ON hospital_analysis_results(cra
 CREATE INDEX IF NOT EXISTS idx_analysis_hospital ON hospital_analysis_results(hospital_id);
 CREATE INDEX IF NOT EXISTS idx_analysis_grade ON hospital_analysis_results(grade);
 
--- 트리거: 세션 업데이트 시 updated_at 자동 갱신
-CREATE TRIGGER IF NOT EXISTS trigger_crawl_sessions_updated
-AFTER UPDATE ON crawl_sessions
-FOR EACH ROW
-BEGIN
-  UPDATE crawl_sessions SET updated_at = datetime('now') WHERE id = NEW.id;
-END;
-
--- 트리거: 병원 추가/삭제 시 세션 통계 자동 계산
-CREATE TRIGGER IF NOT EXISTS trigger_collected_hospitals_after_insert
-AFTER INSERT ON collected_hospitals
-BEGIN
-  UPDATE crawl_sessions
-  SET total_hospitals = (
-      SELECT COUNT(*) FROM collected_hospitals WHERE crawl_session_id = NEW.crawl_session_id
-    ),
-    filtered_hospitals = (
-      SELECT COUNT(*) FROM collected_hospitals
-      WHERE crawl_session_id = NEW.crawl_session_id AND filtering_status = 'matched'
-    ),
-    updated_at = datetime('now')
-  WHERE id = NEW.crawl_session_id;
-END;
+-- [D1 호환성] TRIGGER 제거됨 - 애플리케이션 레벨에서 처리
+-- updated_at 갱신: API 핸들러에서 UPDATE 시 datetime('now') 직접 설정
+-- 세션 통계 갱신: collected-hospitals API 핸들러에서 INSERT 후 세션 통계 업데이트

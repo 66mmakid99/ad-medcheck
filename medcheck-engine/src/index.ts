@@ -35,6 +35,7 @@ import {
   competitorRoutes,
   priceHistoryRoutes,
   coldcallRoutes,
+  ocrPipelineRoutes,
 } from './api/routes';
 import type { AppBindings } from './types/env';
 
@@ -98,6 +99,7 @@ app.route('/v1/price-alerts', priceAlertsRoutes);
 app.route('/v1/competitor-settings', competitorRoutes);
 app.route('/v1/price-history', priceHistoryRoutes);
 app.route('/v1/coldcall', coldcallRoutes);
+app.route('/api/ocr', ocrPipelineRoutes);
 
 // 병원별 스크린샷 (별도 경로)
 app.get('/v1/hospitals/:hospitalId/screenshots', async (c) => {

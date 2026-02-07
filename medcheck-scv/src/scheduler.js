@@ -457,14 +457,14 @@ async function startScheduler(options = {}) {
   // 트리거 폴링 시작
   pollTimer = setInterval(pollTriggers, POLL_INTERVAL);
 
-  // graceful shutdown 대비 stop 파일 감시
+  // graceful shutdown 대비 stop 파일 감시 (2초 간격)
   const stopWatcher = setInterval(() => {
     if (fs.existsSync(STOP_FILE)) {
       log('info', 'Stop 파일 감지 - 종료 중...');
       clearInterval(stopWatcher);
       stopScheduler();
     }
-  }, 5000);
+  }, 2000);
 
   // 상태 파일 기록
   writeStatus();
@@ -486,7 +486,12 @@ async function startScheduler(options = {}) {
   }
 }
 
+let isShuttingDown = false;
+
 async function stopScheduler() {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
   log('info', '스케줄러 종료 중...');
   isRunning = false;
 
@@ -498,16 +503,21 @@ async function stopScheduler() {
   if (pollTimer) clearInterval(pollTimer);
   if (heartbeatTimer) clearInterval(heartbeatTimer);
 
-  // 오프라인 하트비트
+  // 오프라인 하트비트 (isOnline: false 명시)
+  log('info', '오프라인 하트비트 전송 중...');
   try {
     await axios.post(`${API_BASE}/api/crawler/heartbeat`, {
       pid: process.pid,
+      isOnline: false,
       schedules: [],
       runningJobs: 0,
       queuedJobs: 0,
       nextScheduledRun: null,
     }, { timeout: 5000 });
-  } catch (e) { /* ignore */ }
+    log('info', '오프라인 하트비트 전송 완료');
+  } catch (e) {
+    log('warn', '오프라인 하트비트 전송 실패', { error: e.message });
+  }
 
   // PID 파일 삭제
   if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE);
@@ -520,9 +530,16 @@ async function stopScheduler() {
   process.exit(0);
 }
 
-// graceful shutdown
-process.on('SIGINT', stopScheduler);
-process.on('SIGTERM', stopScheduler);
+// graceful shutdown - 시그널에서 async 함수가 완료될 때까지 프로세스 유지
+function handleShutdownSignal() {
+  stopScheduler().catch((e) => {
+    log('error', '종료 중 오류', { error: e.message });
+    process.exit(1);
+  });
+}
+
+process.on('SIGINT', handleShutdownSignal);
+process.on('SIGTERM', handleShutdownSignal);
 
 // ============================================
 // CLI
@@ -564,7 +581,7 @@ program
 program
   .command('stop')
   .description('스케줄러 중지')
-  .action(() => {
+  .action(async () => {
     if (!fs.existsSync(PID_FILE)) {
       console.log('실행 중인 스케줄러가 없습니다.');
       process.exit(0);
@@ -572,16 +589,28 @@ program
 
     const pid = parseInt(fs.readFileSync(PID_FILE, 'utf-8').trim());
 
-    // stop 파일 생성 (graceful fallback)
+    // stop 파일 생성 → 스케줄러가 2초 이내에 감지하여 graceful 종료
     fs.writeFileSync(STOP_FILE, String(Date.now()));
+    console.log(`스케줄러 종료 요청 (PID: ${pid}) - stop 파일 생성됨`);
 
-    try {
-      process.kill(pid, 'SIGTERM');
-      console.log(`스케줄러 종료 요청 (PID: ${pid})`);
-    } catch (e) {
-      console.log(`PID ${pid} 프로세스를 찾을 수 없습니다. PID 파일 정리.`);
-      if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE);
+    // 최대 15초간 PID 파일이 삭제될 때까지 대기 (graceful 종료 확인)
+    const deadline = Date.now() + 15000;
+    while (Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 1000));
+      if (!fs.existsSync(PID_FILE)) {
+        console.log('스케줄러가 정상 종료되었습니다.');
+        process.exit(0);
+      }
     }
+
+    // 타임아웃 → 강제 종료 시도
+    console.log('graceful 종료 타임아웃. 강제 종료 시도...');
+    try {
+      process.kill(pid);
+    } catch (e) { /* ignore */ }
+    if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE);
+    if (fs.existsSync(STOP_FILE)) fs.unlinkSync(STOP_FILE);
+    console.log('스케줄러가 강제 종료되었습니다.');
   });
 
 program

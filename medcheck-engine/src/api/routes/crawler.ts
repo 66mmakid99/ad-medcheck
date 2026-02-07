@@ -255,15 +255,18 @@ crawlerRoutes.get('/logs', async (c) => {
 crawlerRoutes.post('/heartbeat', async (c) => {
   try {
     const body = await c.req.json();
-    const { pid, schedules, runningJobs = 0, queuedJobs = 0, nextScheduledRun } = body;
+    const { pid, schedules, runningJobs = 0, queuedJobs = 0, nextScheduledRun, isOnline } = body;
+
+    // isOnline이 명시적으로 false면 오프라인, 그 외엔 온라인
+    const online = isOnline === false ? 0 : 1;
 
     await c.env.DB.prepare(`
       UPDATE crawler_scheduler_status
-      SET pid = ?, is_online = 1, schedules = ?, running_jobs = ?, queued_jobs = ?,
+      SET pid = ?, is_online = ?, schedules = ?, running_jobs = ?, queued_jobs = ?,
           next_scheduled_run = ?, last_heartbeat = datetime('now')
       WHERE id = 'singleton'
     `).bind(
-      pid || null,
+      pid || null, online,
       schedules ? JSON.stringify(schedules) : null,
       runningJobs, queuedJobs,
       nextScheduledRun || null

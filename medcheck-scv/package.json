@@ -14,7 +14,10 @@
     "checkpoints:clear": "node src/crawler.js --clear-checkpoints",
     "stats": "node src/cli/usage-stats.js",
     "enrich:naver": "node src/enrichers/naver-place.js",
-    "enrich:google": "node src/enrichers/google-search.js"
+    "enrich:google": "node src/enrichers/google-search.js",
+    "scheduler:start": "node src/scheduler.js start --daemon",
+    "scheduler:stop": "node src/scheduler.js stop",
+    "scheduler:status": "node src/scheduler.js status"
   },
   "keywords": [
     "crawler",
@@ -29,6 +32,7 @@
     "axios": "^1.6.0",
     "cheerio": "^1.0.0",
     "commander": "^11.1.0",
+    "node-cron": "^3.0.3",
     "puppeteer": "^24.36.1",
     "xml2js": "^0.6.2"
   }

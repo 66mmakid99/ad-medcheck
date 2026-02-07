@@ -29,3 +29,4 @@ export { competitorRoutes } from './competitor';
 export { priceHistoryRoutes } from './price-history';
 export { coldcallRoutes } from './coldcall';
 export { ocrPipelineRoutes } from './ocr-pipeline';
+export { crawlerRoutes } from './crawler';

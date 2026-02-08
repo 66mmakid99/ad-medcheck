@@ -2751,6 +2751,9 @@ function CrawlerTab({ apiBase }) {
   const [runningJobs, setRunningJobs] = useState([]);
   const [cancellingJob, setCancellingJob] = useState(null);
   const [expandedLog, setExpandedLog] = useState(null);
+  const [logDetail, setLogDetail] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(null);
+  const [lastViolationsOpen, setLastViolationsOpen] = useState(false);
   const [now, setNow] = useState(Date.now());
   const [lastRefresh, setLastRefresh] = useState(null);
 
@@ -2782,6 +2785,17 @@ function CrawlerTab({ apiBase }) {
       const d = await res.json();
       if (d.success) setRunningJobs(d.data || []);
     } catch (e) { /* ignore */ }
+  };
+
+  const loadLogDetail = async (logId) => {
+    if (loadingDetail === logId) return;
+    setLoadingDetail(logId);
+    try {
+      const res = await fetch(`${apiBase}/api/crawler/logs/${logId}`);
+      const d = await res.json();
+      if (d.success) setLogDetail(d.data);
+    } catch (e) { /* ignore */ }
+    setLoadingDetail(null);
   };
 
   const loadAll = async () => {
@@ -3107,6 +3121,75 @@ function CrawlerTab({ apiBase }) {
         </div>
       )}
 
+      {/* ━━━ 실시간 진행 상황 (activeJob) ━━━ */}
+      {status?.activeJob && (
+        <div className="bg-white rounded-2xl border border-indigo-200 shadow-sm overflow-hidden">
+          <div className="px-6 py-3 border-b border-indigo-100 bg-gradient-to-r from-indigo-50 to-white flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-indigo-700 flex items-center gap-2">
+              <div className="w-2.5 h-2.5 bg-indigo-500 rounded-full animate-pulse" />
+              실시간 분석 진행
+            </h3>
+            <span className="text-xs text-indigo-400">5초마다 자동 갱신</span>
+          </div>
+          <div className="px-6 py-4 space-y-4">
+            {/* 프로그레스 바 */}
+            {(() => {
+              const aj = status.activeJob;
+              const pct = aj.totalCount > 0 ? Math.round((aj.processedCount / aj.totalCount) * 100) : 0;
+              return (
+                <>
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-slate-600">진행률</span>
+                    <span className="font-bold text-indigo-600">{pct}% ({aj.processedCount}/{aj.totalCount})</span>
+                  </div>
+                  <div className="w-full bg-slate-100 rounded-full h-3 overflow-hidden">
+                    <div className="bg-gradient-to-r from-indigo-500 to-blue-500 h-3 rounded-full transition-all duration-500" style={{ width: `${pct}%` }} />
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="p-3 rounded-xl bg-slate-50 border border-slate-100">
+                      <div className="text-xs text-slate-400 mb-1">현재 병원</div>
+                      <div className="text-sm font-semibold text-slate-700 truncate">{aj.currentHospital || '-'}</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-red-50 border border-red-100">
+                      <div className="text-xs text-red-400 mb-1">위반 탐지</div>
+                      <div className="text-sm font-bold text-red-600">{aj.foundViolations || 0}건</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-100">
+                      <div className="text-xs text-emerald-400 mb-1">분석 완료</div>
+                      <div className="text-sm font-bold text-emerald-600">{aj.processedCount || 0}개</div>
+                    </div>
+                    <div className="p-3 rounded-xl bg-orange-50 border border-orange-100">
+                      <div className="text-xs text-orange-400 mb-1">실패</div>
+                      <div className="text-sm font-bold text-orange-600">{aj.failedCount || 0}개</div>
+                    </div>
+                  </div>
+                  {/* 최근 로그 */}
+                  {aj.recentLogs && aj.recentLogs.length > 0 && (
+                    <div className="mt-2">
+                      <div className="text-xs text-slate-400 mb-2">최근 처리 로그</div>
+                      <div className="space-y-1">
+                        {aj.recentLogs.slice().reverse().map((log, idx) => (
+                          <div key={idx} className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs ${
+                            log.status === 'error' ? 'bg-red-50 text-red-600' :
+                            log.violations > 0 ? 'bg-amber-50 text-amber-700' :
+                            'bg-slate-50 text-slate-600'
+                          }`}>
+                            <span>{log.status === 'error' ? '✗' : log.violations > 0 ? '⚠️' : '✓'}</span>
+                            <span className="font-medium truncate flex-1">{log.hospital}</span>
+                            {log.grade && log.grade !== '-' && <span className="px-1.5 py-0.5 rounded bg-white border text-xs">{log.grade}</span>}
+                            {log.violations > 0 && <span className="text-red-500 font-medium">위반 {log.violations}건</span>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        </div>
+      )}
+
       {/* ━━━ 대기 트리거 알림 ━━━ */}
       {pending > 0 && (
         <div className="px-4 py-3 rounded-xl text-sm bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-2">
@@ -3203,18 +3286,88 @@ function CrawlerTab({ apiBase }) {
               { label: '유형', value: last.type === 'scheduled' ? '예약' : '수동', icon: last.type === 'scheduled' ? '🕐' : '👆' },
               { label: '시작 시간', value: formatTime(last.started_at), icon: '🕑' },
               { label: '소요시간', value: formatDuration(last.duration_seconds), icon: '⏱️' },
-              { label: '분석 병원', value: `${last.hospitals_analyzed || 0}개`, icon: '🏥' },
-              { label: '위반 탐지', value: `${last.violations_found || 0}건`, icon: '⚠️' },
+              { label: '분석 병원', value: `${last.hospitals_analyzed || last.hospitals_total || 0}개`, icon: '🏥' },
+              { label: '위반 탐지', value: `${last.violations_found || 0}건`, icon: '⚠️', clickable: (last.violations_found || 0) > 0 },
             ].map(item => (
-              <div key={item.label}>
+              <div key={item.label}
+                className={item.clickable ? 'cursor-pointer hover:bg-white/50 rounded-lg p-1 -m-1 transition-colors' : ''}
+                onClick={() => {
+                  if (item.clickable) {
+                    if (!lastViolationsOpen && last.id) loadLogDetail(last.id);
+                    setLastViolationsOpen(!lastViolationsOpen);
+                  }
+                }}
+              >
                 <div className="text-xs text-slate-500 flex items-center gap-1 mb-1">{item.icon} {item.label}</div>
-                <div className="text-sm font-semibold text-slate-700">{item.value}</div>
+                <div className={`text-sm font-semibold ${item.clickable ? 'text-red-600 underline decoration-dotted' : 'text-slate-700'}`}>
+                  {item.value}
+                  {item.clickable && <span className="text-xs ml-1">{lastViolationsOpen ? '▲' : '▼'}</span>}
+                </div>
               </div>
             ))}
           </div>
           {last.error_details && (
             <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-100 text-xs text-red-600 font-mono">
               {last.error_details}
+            </div>
+          )}
+          {/* 위반 상세 펼침 */}
+          {lastViolationsOpen && logDetail && logDetail.id === last.id && (
+            <div className="mt-4 border-t border-slate-200 pt-4 space-y-3">
+              {logDetail.hospitals && logDetail.hospitals.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-slate-500 mb-2">분석 병원 ({logDetail.hospitals.length}개)</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {logDetail.hospitals.map((h, i) => (
+                      <span key={i} className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs border ${
+                        h.violationCount > 0 ? 'bg-red-50 border-red-200 text-red-700 font-medium' : 'bg-slate-50 border-slate-200 text-slate-600'
+                      }`}>
+                        {h.name}
+                        {h.grade && h.grade !== '-' && <span className="opacity-60">({h.grade})</span>}
+                        {h.violationCount > 0 && <span className="text-red-500">{h.violationCount}</span>}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {logDetail.violations && logDetail.violations.length > 0 && (
+                <div>
+                  <div className="text-xs font-semibold text-red-500 mb-2">위반 상세 ({logDetail.violations.length}건)</div>
+                  <div className="space-y-1.5">
+                    {logDetail.violations.map((v, i) => (
+                      <div key={i} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-xs">
+                        <span className="font-semibold text-red-700 min-w-[80px] truncate">{v.hospitalName}</span>
+                        <span className="text-slate-400">|</span>
+                        <span className="text-slate-700 flex-1 truncate">{v.patternName}</span>
+                        {v.matchedText && (
+                          <>
+                            <span className="text-slate-400">|</span>
+                            <span className="text-red-600 font-mono truncate max-w-[200px]">'{v.matchedText}'</span>
+                          </>
+                        )}
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                          v.severity === 'critical' ? 'bg-red-200 text-red-800' :
+                          v.severity === 'major' ? 'bg-orange-200 text-orange-800' :
+                          'bg-yellow-200 text-yellow-800'
+                        }`}>
+                          {v.severity === 'critical' ? '위험' : v.severity === 'major' ? '중요' : '경미'}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {(!logDetail.violations || logDetail.violations.length === 0) && (!logDetail.hospitals || logDetail.hospitals.length === 0) && (
+                <div className="text-center py-4 text-xs text-slate-400">
+                  상세 데이터가 아직 저장되지 않았습니다. 다음 크롤링부터 기록됩니다.
+                </div>
+              )}
+            </div>
+          )}
+          {lastViolationsOpen && loadingDetail === last.id && (
+            <div className="mt-4 text-center py-4 text-xs text-slate-400">
+              <div className="w-5 h-5 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+              상세 데이터 로딩 중...
             </div>
           )}
         </div>
@@ -3271,7 +3424,15 @@ function CrawlerTab({ apiBase }) {
                         className={`cursor-pointer transition-colors ${
                           isExpanded ? 'bg-blue-50/50' : i % 2 === 0 ? 'bg-white hover:bg-slate-50' : 'bg-slate-50/30 hover:bg-slate-50'
                         }`}
-                        onClick={() => setExpandedLog(isExpanded ? null : log.id)}
+                        onClick={() => {
+                          if (isExpanded) {
+                            setExpandedLog(null);
+                            setLogDetail(null);
+                          } else {
+                            setExpandedLog(log.id);
+                            loadLogDetail(log.id);
+                          }
+                        }}
                       >
                         <td className="p-3 pl-6 text-slate-400 text-xs">
                           {isExpanded ? '▼' : '▶'}
@@ -3336,6 +3497,65 @@ function CrawlerTab({ apiBase }) {
                               <div className="mt-3 p-3 rounded-lg bg-red-50 border border-red-100">
                                 <span className="text-xs text-red-500 font-medium block mb-1">오류 상세</span>
                                 <pre className="text-xs text-red-600 font-mono whitespace-pre-wrap">{log.error_details}</pre>
+                              </div>
+                            )}
+                            {/* 병원 + 위반 상세 */}
+                            {logDetail && logDetail.id === log.id && (
+                              <div className="mt-4 space-y-3 border-t border-slate-200 pt-3">
+                                {logDetail.hospitals && logDetail.hospitals.length > 0 && (
+                                  <div>
+                                    <div className="text-xs font-semibold text-slate-500 mb-2">분석 병원 ({logDetail.hospitals.length}개)</div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {logDetail.hospitals.map((h, idx) => (
+                                        <span key={idx} className={`inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs border ${
+                                          h.violationCount > 0 ? 'bg-red-50 border-red-200 text-red-700 font-medium' : 'bg-white border-slate-200 text-slate-600'
+                                        }`}>
+                                          {h.name}
+                                          {h.grade && h.grade !== '-' && <span className="opacity-60">({h.grade})</span>}
+                                          {h.violationCount > 0 && <span className="text-red-500">{h.violationCount}</span>}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {logDetail.violations && logDetail.violations.length > 0 && (
+                                  <div>
+                                    <div className="text-xs font-semibold text-red-500 mb-2">위반 상세 ({logDetail.violations.length}건)</div>
+                                    <div className="space-y-1">
+                                      {logDetail.violations.map((v, idx) => (
+                                        <div key={idx} className="flex items-center gap-2 px-3 py-2 rounded-lg bg-red-50 border border-red-100 text-xs">
+                                          <span className="font-semibold text-red-700 min-w-[80px] truncate">{v.hospitalName}</span>
+                                          <span className="text-slate-300">|</span>
+                                          <span className="text-slate-700 flex-1 truncate">{v.patternName}</span>
+                                          {v.matchedText && (
+                                            <>
+                                              <span className="text-slate-300">|</span>
+                                              <span className="text-red-600 font-mono truncate max-w-[200px]">'{v.matchedText}'</span>
+                                            </>
+                                          )}
+                                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium shrink-0 ${
+                                            v.severity === 'critical' ? 'bg-red-200 text-red-800' :
+                                            v.severity === 'major' ? 'bg-orange-200 text-orange-800' :
+                                            'bg-yellow-200 text-yellow-800'
+                                          }`}>
+                                            {v.severity === 'critical' ? '위험' : v.severity === 'major' ? '중요' : '경미'}
+                                          </span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {(!logDetail.hospitals || logDetail.hospitals.length === 0) && (!logDetail.violations || logDetail.violations.length === 0) && (
+                                  <div className="text-center py-3 text-xs text-slate-400">
+                                    상세 데이터가 아직 저장되지 않았습니다.
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {loadingDetail === log.id && (
+                              <div className="mt-3 text-center py-3 text-xs text-slate-400">
+                                <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-1" />
+                                상세 로딩 중...
                               </div>
                             )}
                           </td>

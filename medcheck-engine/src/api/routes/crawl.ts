@@ -8,13 +8,15 @@ const crawlRoutes = new Hono<AppBindings>();
 crawlRoutes.post('/crawl-status', async (c) => {
   try {
     const body = await c.req.json();
-    const { jobId, jobType, status, progress, total, found, failed, currentItem, startedAt, message } = body;
+    const { jobId, jobType, status, progress, total, found, failed, currentItem, startedAt, message, violationsFound, recentLogs } = body;
 
     if (!jobId) return c.json({ success: false, error: 'jobId required' }, 400);
 
+    const recentLogsJson = recentLogs ? JSON.stringify(recentLogs) : null;
+
     await c.env.DB.prepare(`
-      INSERT INTO crawl_jobs (id, job_type, status, progress, total, found, failed, current_item, started_at, updated_at, message)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?)
+      INSERT INTO crawl_jobs (id, job_type, status, progress, total, found, failed, current_item, started_at, updated_at, message, violations_found, recent_logs)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status = excluded.status,
         progress = excluded.progress,
@@ -23,8 +25,10 @@ crawlRoutes.post('/crawl-status', async (c) => {
         failed = excluded.failed,
         current_item = excluded.current_item,
         updated_at = datetime('now'),
-        message = excluded.message
-    `).bind(jobId, jobType || 'unknown', status || 'running', progress || 0, total || 0, found || 0, failed || 0, currentItem || null, startedAt || new Date().toISOString(), message || null).run();
+        message = excluded.message,
+        violations_found = excluded.violations_found,
+        recent_logs = excluded.recent_logs
+    `).bind(jobId, jobType || 'unknown', status || 'running', progress || 0, total || 0, found || 0, failed || 0, currentItem || null, startedAt || new Date().toISOString(), message || null, violationsFound || 0, recentLogsJson).run();
 
     return c.json({ success: true });
   } catch (e: unknown) {

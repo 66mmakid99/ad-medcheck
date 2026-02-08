@@ -26,6 +26,12 @@ const ANALYZE_BATCH_SIZE = 10;  // 배치 크기
 let currentJobId = null;
 let currentSessionId = null;
 
+// 실시간 진행 추적
+let totalViolations = 0;
+let recentLogEntries = [];       // 최대 5건
+let hospitalsDetailList = [];    // 분석한 병원 목록
+let violationsDetailList = [];   // 위반 상세 목록
+
 /**
  * Sleep 함수
  */
@@ -50,7 +56,9 @@ async function updateCrawlStatus(status) {
       failed: status.failed || 0,
       currentItem: status.currentItem || null,
       startedAt: status.startedAt || new Date().toISOString(),
-      message: status.message || null
+      message: status.message || null,
+      violationsFound: status.violationsFound || totalViolations,
+      recentLogs: status.recentLogs || recentLogEntries
     }, { timeout: 5000 });
   } catch (e) {
     // API 오류는 무시 (로컬 실행 계속)
@@ -447,13 +455,20 @@ async function main() {
     let failed = 0;
     let gradeA = 0, gradeB = 0, gradeC = 0, gradeD = 0, gradeF = 0;
 
+    // 상세 추적 초기화
+    totalViolations = 0;
+    recentLogEntries = [];
+    hospitalsDetailList = [];
+    violationsDetailList = [];
+
     for (let i = 0; i < targetHospitals.length; i++) {
       const hospital = targetHospitals[i];
 
       // 분석할 URL 결정 (우선순위: 홈페이지 > 구글 > 네이버)
       const urlToAnalyze = hospital.homepage || hospital.googleUrl || hospital.naverPlaceUrl;
+      const hospitalName = hospital.name || urlToAnalyze?.replace(/https?:\/\//, '').split('/')[0] || '미확인 병원';
 
-      process.stdout.write(`[${i + 1}/${targetHospitals.length}] ${hospital.name.substring(0, 20).padEnd(20)} `);
+      process.stdout.write(`[${i + 1}/${targetHospitals.length}] ${hospitalName.substring(0, 20).padEnd(20)} `);
 
       try {
         const result = await analyzeUrl(urlToAnalyze, options.enableAi);
@@ -471,18 +486,54 @@ async function main() {
             case 'F': gradeF++; break;
           }
 
-          console.log(`✓ ${data.grade}등급 (위반 ${data.violationCount || 0}건)`);
+          const vCount = data.violationCount || 0;
+          totalViolations += vCount;
+
+          console.log(`✓ ${data.grade}등급 (위반 ${vCount}건)`);
 
           const resultData = {
             ...hospital,
+            name: hospitalName,
             analyzedUrl: urlToAnalyze,
             grade: data.grade,
-            violationCount: data.violationCount || 0,
+            violationCount: vCount,
             summary: data.summary || '',
             violations: data.violations || [],
             status: 'success'
           };
           analysisResults.push(resultData);
+
+          // 병원 상세 추적
+          hospitalsDetailList.push({
+            name: hospitalName,
+            url: urlToAnalyze,
+            grade: data.grade,
+            violationCount: vCount
+          });
+
+          // 위반 상세 추적
+          if (data.violations && data.violations.length > 0) {
+            for (const v of data.violations) {
+              violationsDetailList.push({
+                hospitalName: hospitalName,
+                patternName: v.description || v.type || '알 수 없음',
+                matchedText: v.matchedText || v.matched_text || '',
+                category: v.category || '',
+                grade: data.grade || '-',
+                severity: v.severity || 'medium'
+              });
+            }
+          }
+
+          // 최근 로그 (최대 5건)
+          recentLogEntries.push({
+            time: new Date().toISOString(),
+            hospital: hospitalName,
+            grade: data.grade,
+            violations: vCount,
+            status: 'success'
+          });
+          if (recentLogEntries.length > 5) recentLogEntries.shift();
 
           // 🆕 분석 결과 API 전송
           await sendAnalysisResult(resultData);
@@ -492,6 +543,7 @@ async function main() {
 
           const resultData = {
             ...hospital,
+            name: hospitalName,
             analyzedUrl: urlToAnalyze,
             grade: '-',
             violationCount: 0,
@@ -501,6 +553,22 @@ async function main() {
           };
           analysisResults.push(resultData);
           await sendAnalysisResult(resultData);
+
+          hospitalsDetailList.push({
+            name: hospitalName,
+            url: urlToAnalyze,
+            grade: '-',
+            violationCount: 0
+          });
+
+          recentLogEntries.push({
+            time: new Date().toISOString(),
+            hospital: hospitalName,
+            grade: '-',
+            violations: 0,
+            status: 'error'
+          });
+          if (recentLogEntries.length > 5) recentLogEntries.shift();
         }
       } catch (err) {
         failed++;
@@ -508,6 +576,7 @@ async function main() {
 
         const resultData = {
           ...hospital,
+          name: hospitalName,
           analyzedUrl: urlToAnalyze,
           grade: '-',
           violationCount: 0,
@@ -517,23 +586,39 @@ async function main() {
         };
         analysisResults.push(resultData);
         await sendAnalysisResult(resultData);
+
+        hospitalsDetailList.push({
+          name: hospitalName,
+          url: urlToAnalyze,
+          grade: '-',
+          violationCount: 0
+        });
+
+        recentLogEntries.push({
+          time: new Date().toISOString(),
+          hospital: hospitalName,
+          grade: '-',
+          violations: 0,
+          status: 'error'
+        });
+        if (recentLogEntries.length > 5) recentLogEntries.shift();
       }
 
       analyzed++;
 
-      // 🆕 실시간 상태 업데이트 (10개마다)
-      if (analyzed % 10 === 0 || analyzed === targetHospitals.length) {
-        await updateCrawlStatus({
-          jobType: 'analysis',
-          status: 'running',
-          progress: analyzed,
-          total: targetHospitals.length,
-          found: success,
-          failed: failed,
-          currentItem: hospital.name,
-          message: `분석 중: ${analyzed}/${targetHospitals.length}`
-        });
-      }
+      // 실시간 상태 업데이트 (매 병원마다)
+      await updateCrawlStatus({
+        jobType: 'analysis',
+        status: 'running',
+        progress: analyzed,
+        total: targetHospitals.length,
+        found: success,
+        failed: failed,
+        currentItem: hospitalName,
+        message: `분석 중: ${analyzed}/${targetHospitals.length}`,
+        violationsFound: totalViolations,
+        recentLogs: recentLogEntries
+      });
 
       // 딜레이
       if (i < targetHospitals.length - 1) {
@@ -549,8 +634,11 @@ async function main() {
     console.log('\n' + '-'.repeat(60));
     console.log('[분석 결과]');
     console.log(`  분석: ${analyzed}개`);
+    console.log(`  분석 완료: ${analyzed}`);
     console.log(`  성공: ${success}개 (${(success / analyzed * 100).toFixed(1)}%)`);
     console.log(`  실패: ${failed}개`);
+    console.log(`  총 병원: ${targetHospitals.length}개`);
+    console.log(`  위반: ${totalViolations}`);
     console.log('\n[등급 분포]');
     console.log(`  A등급 (양호): ${gradeA}개`);
     console.log(`  B등급 (경미): ${gradeB}개`);
@@ -561,7 +649,19 @@ async function main() {
     console.log(`  CSV: ${csvPath}`);
     console.log(`  JSON: ${jsonPath}`);
 
-    // 🆕 분석 완료 상태 전송
+    // 구조화된 결과 출력 (scheduler에서 파싱)
+    console.log('\n__PIPELINE_RESULT_JSON__');
+    console.log(JSON.stringify({
+      hospitalsTotal: targetHospitals.length,
+      hospitalsAnalyzed: analyzed,
+      violationsFound: totalViolations,
+      errorCount: failed,
+      hospitalsDetail: hospitalsDetailList,
+      violationsDetail: violationsDetailList
+    }));
+    console.log('__PIPELINE_RESULT_END__');
+
+    // 분석 완료 상태 전송
     await updateCrawlStatus({
       jobType: 'analysis',
       status: 'completed',
@@ -569,6 +669,8 @@ async function main() {
       total: analyzed,
       found: success,
       failed: failed,
+      violationsFound: totalViolations,
+      recentLogs: recentLogEntries,
       message: JSON.stringify({
         timestamp,
         grades: { A: gradeA, B: gradeB, C: gradeC, D: gradeD, F: gradeF }

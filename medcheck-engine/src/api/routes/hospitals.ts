@@ -68,6 +68,12 @@ hospitalRoutes.post('/analyze-url', async (c) => {
       return c.json({ success: false, error: { code: 'INVALID_INPUT', message: 'url 필드는 필수입니다.' } }, 400);
     }
 
+    // URL 정규화: http(s):// 없으면 자동 추가
+    let targetUrl = url.trim();
+    if (!/^https?:\/\//i.test(targetUrl)) {
+      targetUrl = 'http://' + targetUrl;
+    }
+
     const startTime = Date.now();
 
     const controller = new AbortController();
@@ -75,9 +81,9 @@ hospitalRoutes.post('/analyze-url', async (c) => {
 
     let htmlResponse: Response;
     try {
-      htmlResponse = await fetch(url, {
+      htmlResponse = await fetch(targetUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; MedCheck-Analyzer/1.0)',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html',
         },
         signal: controller.signal,
@@ -115,7 +121,7 @@ hospitalRoutes.post('/analyze-url', async (c) => {
       success: true,
       data: {
         analysisId: result.id,
-        url,
+        url: targetUrl,
         hospitalId,
         hospitalName,
         inputLength: textContent.length,

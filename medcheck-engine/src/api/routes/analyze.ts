@@ -339,6 +339,12 @@ analyzeRoutes.post('-url', async (c) => {
     }, 400);
   }
 
+  // URL 정규화: http(s):// 없으면 자동 추가
+  let targetUrl = body.url.trim();
+  if (!/^https?:\/\//i.test(targetUrl)) {
+    targetUrl = 'http://' + targetUrl;
+  }
+
   try {
     const startTime = Date.now();
 
@@ -348,9 +354,9 @@ analyzeRoutes.post('-url', async (c) => {
 
     let htmlResponse: Response;
     try {
-      htmlResponse = await fetch(body.url, {
+      htmlResponse = await fetch(targetUrl, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; MedCheck-Analyzer/1.0)',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html',
         },
         signal: controller.signal,
@@ -405,7 +411,7 @@ analyzeRoutes.post('-url', async (c) => {
       success: true,
       data: {
         analysisId: result.id,
-        url: body.url,
+        url: targetUrl,
         hospitalId: body.hospitalId,
         hospitalName: body.hospitalName,
         inputLength: textContent.length,
@@ -807,7 +813,7 @@ analyzeRoutes.post('/url-with-images', async (c) => {
     try {
       htmlResponse = await fetch(body.url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (compatible; MedCheck-Analyzer/1.0)',
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
           'Accept': 'text/html',
         },
         signal: urlController.signal,

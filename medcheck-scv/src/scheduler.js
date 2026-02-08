@@ -296,9 +296,29 @@ function parseResult(stdout) {
     hospitalsAnalyzed: 0,
     violationsFound: 0,
     errorCount: 0,
+    hospitalsDetail: null,
+    violationsDetail: null,
   };
 
-  const totalMatch = stdout.match(/총\s*(\d+)\s*개/);
+  // 구조화된 JSON 결과 파싱 시도
+  const jsonMatch = stdout.match(/__PIPELINE_RESULT_JSON__\n([\s\S]*?)\n__PIPELINE_RESULT_END__/);
+  if (jsonMatch) {
+    try {
+      const parsed = JSON.parse(jsonMatch[1]);
+      result.hospitalsTotal = parsed.hospitalsTotal || 0;
+      result.hospitalsAnalyzed = parsed.hospitalsAnalyzed || 0;
+      result.violationsFound = parsed.violationsFound || 0;
+      result.errorCount = parsed.errorCount || 0;
+      result.hospitalsDetail = parsed.hospitalsDetail || null;
+      result.violationsDetail = parsed.violationsDetail || null;
+      return result;
+    } catch (e) {
+      // JSON 파싱 실패 시 텍스트 파싱으로 폴백
+    }
+  }
+
+  // 텍스트 기반 파싱 (폴백)
+  const totalMatch = stdout.match(/총\s*병원[:\s]*(\d+)/);
   if (totalMatch) result.hospitalsTotal = parseInt(totalMatch[1]);
 
   const analyzedMatch = stdout.match(/분석\s*완료[:\s]*(\d+)/);
@@ -335,6 +355,8 @@ async function finishJob(job, logId, startTime, result) {
     errorCount: result.errorCount || 0,
     errorDetails: result.error || result.errorDetails || null,
     triggerId: job.triggerId || null,
+    hospitalsDetail: result.hospitalsDetail || null,
+    violationsDetail: result.violationsDetail || null,
   });
 
   // 트리거 완료 보고

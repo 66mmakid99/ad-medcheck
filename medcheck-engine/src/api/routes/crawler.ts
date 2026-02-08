@@ -47,6 +47,33 @@ crawlerRoutes.get('/status', async (c) => {
       `SELECT COUNT(*) as count FROM crawler_triggers WHERE status = 'pending'`
     ).first();
 
+    // 실행 중인 activeJob (crawl_jobs 테이블)
+    const activeJobRow = await db.prepare(
+      `SELECT * FROM crawl_jobs WHERE status = 'running' ORDER BY updated_at DESC LIMIT 1`
+    ).first();
+
+    let activeJob = null;
+    if (activeJobRow) {
+      let parsedRecentLogs: unknown[] = [];
+      try {
+        if (activeJobRow.recent_logs) parsedRecentLogs = JSON.parse(activeJobRow.recent_logs as string);
+      } catch { /* ignore */ }
+
+      activeJob = {
+        jobId: activeJobRow.id,
+        jobType: activeJobRow.job_type,
+        currentHospital: activeJobRow.current_item,
+        processedCount: activeJobRow.progress,
+        totalCount: activeJobRow.total,
+        foundViolations: activeJobRow.violations_found || 0,
+        failedCount: activeJobRow.failed,
+        recentLogs: parsedRecentLogs,
+        startedAt: activeJobRow.started_at,
+        updatedAt: activeJobRow.updated_at,
+        message: activeJobRow.message,
+      };
+    }
+
     return c.json({
       success: true,
       data: {
@@ -59,6 +86,7 @@ crawlerRoutes.get('/status', async (c) => {
           queuedJobs: scheduler.queued_jobs,
           nextScheduledRun: scheduler.next_scheduled_run,
         } : null,
+        activeJob,
         lastCrawl: lastCrawl || null,
         todaySummary: {
           runs: todaySummary?.runs || 0,
@@ -242,15 +270,19 @@ crawlerRoutes.post('/log', async (c) => {
       id, jobId, type = 'scheduled', region, status = 'running',
       startedAt, completedAt, durationSeconds,
       hospitalsTotal, hospitalsAnalyzed, violationsFound,
-      errorCount, errorDetails, triggerId
+      errorCount, errorDetails, triggerId,
+      hospitalsDetail, violationsDetail
     } = body;
 
     const logId = id || `LOG-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    const hospitalsDetailJson = hospitalsDetail ? JSON.stringify(hospitalsDetail) : null;
+    const violationsDetailJson = violationsDetail ? JSON.stringify(violationsDetail) : null;
 
     await c.env.DB.prepare(`
       INSERT INTO crawl_logs (id, job_id, type, region, status, started_at, completed_at, duration_seconds,
-        hospitals_total, hospitals_analyzed, violations_found, error_count, error_details, trigger_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        hospitals_total, hospitals_analyzed, violations_found, error_count, error_details, trigger_id,
+        hospitals_detail, violations_detail)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         status = excluded.status,
         completed_at = excluded.completed_at,
@@ -259,15 +291,48 @@ crawlerRoutes.post('/log', async (c) => {
         hospitals_analyzed = excluded.hospitals_analyzed,
         violations_found = excluded.violations_found,
         error_count = excluded.error_count,
-        error_details = excluded.error_details
+        error_details = excluded.error_details,
+        hospitals_detail = excluded.hospitals_detail,
+        violations_detail = excluded.violations_detail
     `).bind(
       logId, jobId, type, region || null, status,
       startedAt || new Date().toISOString(), completedAt || null, durationSeconds || null,
       hospitalsTotal || 0, hospitalsAnalyzed || 0, violationsFound || 0,
-      errorCount || 0, errorDetails || null, triggerId || null
+      errorCount || 0, errorDetails || null, triggerId || null,
+      hospitalsDetailJson, violationsDetailJson
     ).run();
 
     return c.json({ success: true, data: { id: logId } });
+  } catch (e: unknown) {
+    return handleApiError(c, e);
+  }
+});
+
+// ============================================
+// GET /logs/:id - 크롤링 로그 상세 (병원+위반 포함)
+// ============================================
+crawlerRoutes.get('/logs/:id', async (c) => {
+  try {
+    const id = c.req.param('id');
+    const log = await c.env.DB.prepare(
+      `SELECT * FROM crawl_logs WHERE id = ?`
+    ).bind(id).first();
+
+    if (!log) return c.json({ success: false, error: 'Log not found' }, 404);
+
+    let hospitals: unknown[] = [];
+    let violations: unknown[] = [];
+    try {
+      if (log.hospitals_detail) hospitals = JSON.parse(log.hospitals_detail as string);
+    } catch { /* ignore */ }
+    try {
+      if (log.violations_detail) violations = JSON.parse(log.violations_detail as string);
+    } catch { /* ignore */ }
+
+    return c.json({
+      success: true,
+      data: { ...log, hospitals, violations }
+    });
   } catch (e: unknown) {
     return handleApiError(c, e);
   }

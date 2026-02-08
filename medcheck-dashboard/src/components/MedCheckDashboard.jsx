@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import PriceAnalytics from './PriceAnalytics';
 
 // ============================================
@@ -9,7 +10,7 @@ import PriceAnalytics from './PriceAnalytics';
 const API_BASE = 'https://medcheck-engine.mmakid.workers.dev';
 
 export default function MedCheckDashboard() {
-  const [activeTab, setActiveTab] = useState('analyze');
+  const [activeTab, setActiveTab] = useState('home');
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
@@ -98,6 +99,7 @@ export default function MedCheckDashboard() {
 
   // 사이드바 메뉴
   const menuItems = [
+    { id: 'home', name: '대시보드 홈', icon: '📊' },
     { id: 'analyze', name: 'URL 분석', icon: '🔍' },
     { id: 'adcheck', name: '에드체크', icon: '✅' },
     { id: 'pricing', name: '시술가격', icon: '💰', badge: priceAlerts.length },
@@ -249,6 +251,7 @@ export default function MedCheckDashboard() {
 
         {/* 메인 콘텐츠 영역 */}
         <main className="flex-1 overflow-auto p-6">
+          {activeTab === 'home' && <OverviewPage apiBase={API_BASE} onNavigate={setActiveTab} />}
           {activeTab === 'analyze' && <UrlAnalysisPage apiBase={API_BASE} />}
           {activeTab === 'adcheck' && <AdCheckTab apiBase={API_BASE} />}
           {activeTab === 'pricing' && (
@@ -363,9 +366,9 @@ function StatCard({ title, value, color, change }) {
 }
 
 // ============================================
-// 라인 차트 (SVG)
+// 라인 차트 (SVG) - 간단한 인라인 차트용
 // ============================================
-function LineChart({ data = [], height = 200 }) {
+function SvgLineChart({ data = [], height = 200 }) {
   const width = 600;
   const padding = 50;
   
@@ -507,6 +510,301 @@ function SparklineCard({ label, value, change, positive = true, color = '#3b82f6
       <svg viewBox="0 0 120 35" className="w-full h-10">
         <polyline points={points} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
       </svg>
+    </div>
+  );
+}
+
+// ============================================
+// 대시보드 홈 (Overview)
+// ============================================
+function OverviewPage({ apiBase, onNavigate }) {
+  const [ocrResults, setOcrResults] = useState([]);
+  const [accuracyStats, setAccuracyStats] = useState(null);
+  const [crawlerStatus, setCrawlerStatus] = useState(null);
+  const [analysisStats, setAnalysisStats] = useState(null);
+  const [healthData, setHealthData] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadData(); }, []);
+
+  const loadData = async () => {
+    setLoading(true);
+    await Promise.all([
+      fetch(`${apiBase}/api/ocr/results?limit=10`).then(r => r.json()).then(d => { if (d.success) setOcrResults(d.data?.results || d.data || []); }).catch(() => {}),
+      fetch(`${apiBase}/api/ocr/accuracy/stats`).then(r => r.json()).then(d => { if (d.success) setAccuracyStats(d.data); }).catch(() => {}),
+      fetch(`${apiBase}/api/crawler/status`).then(r => r.json()).then(d => { if (d.success) setCrawlerStatus(d.data); }).catch(() => {}),
+      fetch(`${apiBase}/v1/analysis-results/stats`).then(r => r.json()).then(d => { if (d.success) setAnalysisStats(d.data); }).catch(() => {}),
+      fetch(`${apiBase}/v1/health`).then(r => r.json()).then(d => setHealthData(d)).catch(() => {}),
+    ]);
+    setLoading(false);
+  };
+
+  const formatTime = (ts) => {
+    if (!ts) return '-';
+    return new Date(ts).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  };
+
+  // 오늘/어제 위반 수 계산
+  const byDate = analysisStats?.byDate || [];
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const yesterdayStr = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const todayData = byDate.find(d => d.date === todayStr);
+  const yesterdayData = byDate.find(d => d.date === yesterdayStr);
+  const todayViolations = todayData?.violations || 0;
+  const delta = todayViolations - (yesterdayData?.violations || 0);
+
+  // 정확도
+  const overallAcc = accuracyStats?.overall?.accuracy ?? null;
+  const regexAcc = accuracyStats?.byMode?.find(m => m.mode === 'regex')?.accuracy;
+  const hybridAcc = accuracyStats?.byMode?.find(m => m.mode === 'hybrid')?.accuracy;
+
+  // 크롤러
+  const isOnline = crawlerStatus?.schedulerOnline;
+  const lastCrawlTime = crawlerStatus?.lastCrawl?.started_at;
+
+  // 차트 데이터 (최근 7일)
+  const chartData = byDate.map(d => ({
+    date: d.date.slice(5), // MM-DD
+    total: d.count || 0,
+    violations: d.violations || 0,
+  })).reverse();
+
+  // 등급 배지
+  const gradeBadge = (g) => {
+    const map = {
+      S: 'bg-cyan-100 text-cyan-700', A: 'bg-emerald-100 text-emerald-700',
+      B: 'bg-blue-100 text-blue-700', C: 'bg-yellow-100 text-yellow-700',
+      D: 'bg-orange-100 text-orange-700', F: 'bg-red-100 text-red-700',
+    };
+    return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${map[g] || 'bg-slate-100 text-slate-600'}`}>{g || '-'}</span>;
+  };
+
+  const modeBadge = (m) => m === 'hybrid'
+    ? <span className="px-2 py-0.5 rounded text-xs bg-purple-100 text-purple-700">hybrid</span>
+    : <span className="px-2 py-0.5 rounded text-xs bg-slate-100 text-slate-600">regex</span>;
+
+  if (loading) {
+    return (
+      <div className="space-y-6 animate-pulse">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[1,2,3,4].map(i => <div key={i} className="bg-white rounded-2xl h-28 border border-slate-200" />)}
+        </div>
+        <div className="bg-white rounded-2xl h-64 border border-slate-200" />
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white rounded-2xl h-72 border border-slate-200" />
+          <div className="bg-white rounded-2xl h-72 border border-slate-200" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* ━━━ 1. 핵심 지표 카드 4개 ━━━ */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* 카드 1: 오늘 위반 탐지 */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-red-50 flex items-center justify-center text-2xl shrink-0">🛡️</div>
+          <div className="min-w-0">
+            <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">오늘 위반 탐지</div>
+            <div className="text-2xl font-bold text-slate-800 mt-0.5">{todayViolations}건</div>
+            <div className={`text-xs mt-0.5 font-medium ${delta > 0 ? 'text-red-500' : delta < 0 ? 'text-emerald-500' : 'text-slate-400'}`}>
+              {delta !== 0 ? `전일 대비 ${delta > 0 ? '+' : ''}${delta}건` : '전일 동일'}
+            </div>
+          </div>
+        </div>
+
+        {/* 카드 2: AI 분석 정확도 */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-blue-50 flex items-center justify-center text-2xl shrink-0">🎯</div>
+          <div className="min-w-0">
+            <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">AI 분석 정확도</div>
+            <div className="text-2xl font-bold text-slate-800 mt-0.5">
+              {overallAcc != null ? `${Math.round(overallAcc)}%` : '—'}
+            </div>
+            <div className="text-xs text-slate-400 mt-0.5">
+              regex {regexAcc != null ? `${Math.round(regexAcc)}%` : '-'} / hybrid {hybridAcc != null ? `${Math.round(hybridAcc)}%` : '-'}
+            </div>
+          </div>
+        </div>
+
+        {/* 카드 3: 크롤러 상태 */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center text-2xl shrink-0">🕷️</div>
+          <div className="min-w-0">
+            <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">크롤러 상태</div>
+            <div className={`text-2xl font-bold mt-0.5 ${isOnline ? 'text-emerald-600' : 'text-red-500'}`}>
+              {isOnline ? '온라인' : '오프라인'}
+            </div>
+            <div className="text-xs text-slate-400 mt-0.5">
+              마지막 실행: {formatTime(lastCrawlTime)}
+            </div>
+          </div>
+        </div>
+
+        {/* 카드 4: 서비스 현황 */}
+        <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm hover:shadow-md transition-shadow flex items-center gap-4">
+          <div className="w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center text-2xl shrink-0">🚀</div>
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">서비스 현황</div>
+            <div className="mt-1.5">
+              <div className="w-full bg-slate-100 rounded-full h-2">
+                <div className="bg-indigo-500 h-2 rounded-full" style={{ width: '33%' }} />
+              </div>
+            </div>
+            <div className="text-xs text-slate-600 font-medium mt-1">수비수 서비스 1/3 출시</div>
+            <div className="text-xs text-slate-400 mt-0.5">
+              위반 탐지 <span className="text-emerald-500">✓</span> | AEO/GEO <span className="text-amber-500">🔜</span> | 마케팅 <span className="text-amber-500">🔜</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ━━━ 2. 최근 위반 탐지 목록 ━━━ */}
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-slate-700">최근 위반 탐지</h3>
+          <button
+            onClick={() => onNavigate('analyze')}
+            className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+          >
+            전체 보기 <span>→</span>
+          </button>
+        </div>
+        {ocrResults.length === 0 ? (
+          <div className="p-12 text-center">
+            <div className="text-4xl mb-3">📭</div>
+            <p className="text-sm text-slate-400">위반 탐지 기록이 없습니다</p>
+            <p className="text-xs text-slate-300 mt-1">OCR 분석을 실행하면 여기에 결과가 표시됩니다</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50/80">
+                <tr>
+                  <th className="text-left p-3 pl-6 font-medium text-slate-500 text-xs uppercase tracking-wider">시간</th>
+                  <th className="text-left p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">내용</th>
+                  <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">등급</th>
+                  <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">위반 수</th>
+                  <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">분석모드</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {ocrResults.map((r, i) => {
+                  const violations = typeof r.violations === 'string' ? JSON.parse(r.violations || '[]') : (r.violations || []);
+                  const vCount = Array.isArray(violations) ? violations.length : 0;
+                  const preview = r.image_url
+                    ? r.image_url.slice(0, 50) + (r.image_url.length > 50 ? '...' : '')
+                    : (r.extracted_text || '-').slice(0, 50) + ((r.extracted_text || '').length > 50 ? '...' : '');
+                  return (
+                    <tr key={r.id || i} className={`${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'} hover:bg-blue-50/30 transition-colors`}>
+                      <td className="p-3 pl-6 text-slate-600 whitespace-nowrap">{formatTime(r.created_at)}</td>
+                      <td className="p-3 text-slate-700 max-w-xs truncate font-mono text-xs">{preview}</td>
+                      <td className="p-3 text-center">{gradeBadge(r.grade)}</td>
+                      <td className="p-3 text-center">
+                        <span className={`font-semibold ${vCount > 0 ? 'text-red-600' : 'text-slate-400'}`}>{vCount}</span>
+                      </td>
+                      <td className="p-3 text-center">{modeBadge(r.analysis_mode)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* ━━━ 3. 하단 2-column ━━━ */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* 좌측: 주간 탐지 추이 차트 */}
+        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+          <h3 className="text-sm font-semibold text-slate-700 mb-4">주간 탐지 추이</h3>
+          {chartData.length > 0 ? (
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                <XAxis dataKey="date" tick={{ fontSize: 12, fill: '#94a3b8' }} />
+                <YAxis tick={{ fontSize: 12, fill: '#94a3b8' }} allowDecimals={false} />
+                <Tooltip
+                  contentStyle={{ borderRadius: '12px', border: '1px solid #e2e8f0', fontSize: '13px' }}
+                  labelFormatter={(v) => `날짜: ${v}`}
+                />
+                <Line type="monotone" dataKey="total" stroke="#3b82f6" strokeWidth={2} dot={{ r: 4 }} name="전체 분석" />
+                <Line type="monotone" dataKey="violations" stroke="#ef4444" strokeWidth={2} dot={{ r: 4 }} name="위반 탐지" />
+              </LineChart>
+            </ResponsiveContainer>
+          ) : (
+            <div className="h-[220px] flex flex-col items-center justify-center">
+              <div className="text-3xl mb-2">📈</div>
+              <p className="text-sm text-slate-400">데이터 수집 중</p>
+              <p className="text-xs text-slate-300 mt-1">분석 결과가 쌓이면 차트가 표시됩니다</p>
+            </div>
+          )}
+        </div>
+
+        {/* 우측: 시스템 상태 요약 */}
+        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+          <h3 className="text-sm font-semibold text-slate-700 mb-4">시스템 상태</h3>
+          <div className="space-y-3">
+            {/* 크롤러 */}
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center text-lg">🕷️</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-slate-700">크롤러</div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  다음 예정: {formatTime(crawlerStatus?.schedulerInfo?.nextScheduledRun)}
+                  <span className="mx-1.5">·</span>
+                  오늘 {crawlerStatus?.todaySummary?.runs || 0}회 실행
+                </div>
+              </div>
+              <div className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-red-400'}`} />
+            </div>
+
+            {/* API 상태 */}
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <div className="w-9 h-9 rounded-lg bg-blue-100 flex items-center justify-center text-lg">🌐</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-slate-700">API 서버</div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  {healthData?.status === 'ok' || healthData?.status === 'healthy'
+                    ? 'MedCheck Engine 정상 작동 중'
+                    : '상태 확인 필요'}
+                </div>
+              </div>
+              <div className={`w-2.5 h-2.5 rounded-full ${healthData ? 'bg-emerald-400' : 'bg-red-400'}`} />
+            </div>
+
+            {/* 분석 패턴 */}
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <div className="w-9 h-9 rounded-lg bg-indigo-100 flex items-center justify-center text-lg">📋</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-slate-700">분석 패턴</div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  전체 156개 패턴 활성
+                  <span className="mx-1.5">·</span>
+                  32개 카테고리
+                </div>
+              </div>
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+            </div>
+
+            {/* 분석 통계 */}
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
+              <div className="w-9 h-9 rounded-lg bg-amber-100 flex items-center justify-center text-lg">📊</div>
+              <div className="flex-1 min-w-0">
+                <div className="text-sm font-medium text-slate-700">누적 분석</div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  총 {analysisStats?.total || 0}건 분석
+                  <span className="mx-1.5">·</span>
+                  위반 {analysisStats?.violations || 0}건
+                  <span className="mx-1.5">·</span>
+                  양호 {analysisStats?.clean || 0}건
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1507,7 +1805,7 @@ function PerformanceTab({ apiBase }) {
 
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
         <h4 className="font-bold text-slate-800 mb-4">📊 성능 트렌드</h4>
-        <LineChart />
+        <SvgLineChart />
       </div>
 
       <div className="grid grid-cols-3 gap-4">

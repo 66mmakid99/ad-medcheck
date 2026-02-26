@@ -16,6 +16,7 @@ export default function MedCheckDashboard() {
   const [loading, setLoading] = useState(true);
   const [currentTime, setCurrentTime] = useState(new Date());
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState({});
 
   // 기존 데이터
   const [healthData, setHealthData] = useState(null);
@@ -99,23 +100,55 @@ export default function MedCheckDashboard() {
     return price.toLocaleString() + '원';
   };
 
-  // 사이드바 메뉴
-  const menuItems = [
-    { id: 'home', name: '대시보드 홈', icon: '📊' },
-    { id: 'analyze', name: 'URL 분석', icon: '🔍' },
-    { id: 'adcheck', name: '에드체크', icon: '✅' },
-    { id: 'pricing', name: '시술가격', icon: '💰', badge: priceAlerts.length },
-    { id: 'alerts', name: '가격알림', icon: '🔔', badge: priceAlerts.filter(a => !a.is_read).length },
-    { id: 'mapping', name: '매핑승인', icon: '🔄', badge: mappingCandidates.length },
-    { id: 'patternMgmt', name: '패턴 관리', icon: '🛡️', badge: (fpStats.summary?.pending || 0) + (tricksStats.summary?.total || 0) },
-    { id: 'performance', name: '성능', icon: '📈' },
-    { id: 'history', name: '이력', icon: '📜' },
-    { id: 'priceAnalytics', name: '가격분석', icon: '📊' },
-    { id: 'ocr', name: 'OCR 분석', icon: '🖼️' },
-    { id: 'crawler', name: '크롤러 현황', icon: '🕷️' },
-    { id: 'aeoGeo', name: 'AG MedCheck', icon: '🤖' },
-    { id: 'viral', name: 'Viral MedCheck', icon: '📣' },
+  // 사이드바 메뉴 (그룹화)
+  const menuGroups = [
+    {
+      items: [
+        { id: 'home', name: '대시보드 홈', icon: '📊' },
+      ],
+    },
+    {
+      group: 'defender',
+      label: '수비수 서비스',
+      icon: '🛡️',
+      items: [
+        { id: 'analyze', name: 'Ad MedCheck', icon: '🔍' },
+        { id: 'adcheck', name: '에드체크', icon: '✅' },
+        { id: 'aeoGeo', name: 'AG MedCheck', icon: '🤖' },
+        { id: 'viral', name: 'Viral MedCheck', icon: '📣' },
+      ],
+    },
+    {
+      group: 'system',
+      label: '시스템 관리',
+      icon: '⚙️',
+      items: [
+        { id: 'crawler', name: '크롤러 현황', icon: '🕷️' },
+        { id: 'performance', name: '분석 이력', icon: '📈' },
+        { id: 'history', name: '이력', icon: '📜' },
+        { id: 'patternMgmt', name: '오탐/예외 관리', icon: '🛡️', badge: (fpStats.summary?.pending || 0) + (tricksStats.summary?.total || 0) },
+        { id: 'ocr', name: 'OCR 분석', icon: '🖼️' },
+      ],
+    },
+    {
+      group: 'attacker',
+      label: '공격수 (가격)',
+      icon: '🔒',
+      items: [
+        { id: 'pricing', name: '시술가격', icon: '💰', badge: priceAlerts.length },
+        { id: 'alerts', name: '가격알림', icon: '🔔', badge: priceAlerts.filter(a => !a.is_read).length },
+        { id: 'mapping', name: '매핑승인', icon: '🔄', badge: mappingCandidates.length },
+        { id: 'priceAnalytics', name: '가격분석', icon: '📊' },
+      ],
+    },
   ];
+
+  const toggleGroup = (group) => {
+    setCollapsedGroups(prev => ({ ...prev, [group]: !prev[group] }));
+  };
+
+  // flat list for header breadcrumb
+  const menuItems = menuGroups.flatMap(g => g.items);
 
   if (loading) {
     return (
@@ -157,38 +190,56 @@ export default function MedCheckDashboard() {
           </div>
         )}
 
-        {/* 메뉴 */}
+        {/* 메뉴 (그룹화) */}
         <nav className="flex-1 p-3 mt-2 overflow-y-auto">
-          <ul className="space-y-1">
-            {menuItems.map((item) => (
-              <li key={item.id}>
-                <button
-                  onClick={() => setActiveTab(item.id)}
-                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-left transition-all duration-200 group ${
-                    activeTab === item.id
-                      ? 'bg-white text-slate-800 shadow-lg'
-                      : 'text-slate-300 hover:bg-white/10 hover:text-white'
-                  }`}
-                >
-                  <span className={`text-xl ${activeTab === item.id ? '' : 'group-hover:scale-110'} transition-transform`}>
-                    {item.icon}
-                  </span>
-                  {!sidebarCollapsed && (
-                    <>
-                      <span className="text-sm font-medium flex-1">{item.name}</span>
-                      {item.badge > 0 && (
-                        <span className={`min-w-[20px] h-5 flex items-center justify-center text-xs font-bold rounded-full ${
-                          item.id === 'alerts' ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'
-                        }`}>
-                          {item.badge}
-                        </span>
-                      )}
-                    </>
-                  )}
-                </button>
-              </li>
+          <div className="space-y-4">
+            {menuGroups.map((group, gi) => (
+              <div key={gi}>
+                {group.group && !sidebarCollapsed && (
+                  <button
+                    onClick={() => toggleGroup(group.group)}
+                    className="w-full flex items-center gap-2 px-3 py-1.5 text-xs font-semibold text-slate-400 uppercase tracking-wider hover:text-slate-200 transition"
+                  >
+                    <span>{group.icon}</span>
+                    <span className="flex-1 text-left">{group.label}</span>
+                    <span className={`transition-transform text-[10px] ${collapsedGroups[group.group] ? '' : 'rotate-180'}`}>▼</span>
+                  </button>
+                )}
+                {!collapsedGroups[group.group] && (
+                  <ul className="space-y-1 mt-1">
+                    {group.items.map((item) => (
+                      <li key={item.id}>
+                        <button
+                          onClick={() => setActiveTab(item.id)}
+                          className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-left transition-all duration-200 group ${
+                            activeTab === item.id
+                              ? 'bg-white text-slate-800 shadow-lg'
+                              : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                          }`}
+                        >
+                          <span className={`text-lg ${activeTab === item.id ? '' : 'group-hover:scale-110'} transition-transform`}>
+                            {item.icon}
+                          </span>
+                          {!sidebarCollapsed && (
+                            <>
+                              <span className="text-sm font-medium flex-1">{item.name}</span>
+                              {item.badge > 0 && (
+                                <span className={`min-w-[20px] h-5 flex items-center justify-center text-xs font-bold rounded-full ${
+                                  item.id === 'alerts' ? 'bg-red-500 text-white' : 'bg-blue-500 text-white'
+                                }`}>
+                                  {item.badge}
+                                </span>
+                              )}
+                            </>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             ))}
-          </ul>
+          </div>
         </nav>
 
         {/* 하단 */}

@@ -43,6 +43,7 @@ import {
   ocrPipelineRoutes,
   crawlerRoutes,
   reportRoutes,
+  aeoRoutes,
 } from './api/routes';
 import type { AppBindings, Env } from './types/env';
 
@@ -476,6 +477,7 @@ app.route('/v1/coldcall', coldcallRoutes);
 app.route('/api/ocr', ocrPipelineRoutes);
 app.route('/api/crawler', crawlerRoutes);
 app.route('/v1/report', reportRoutes);
+app.route('/v1/aeo', aeoRoutes);
 
 // 병원별 스크린샷
 app.get('/v1/hospitals/:hospitalId/screenshots', async (c) => {

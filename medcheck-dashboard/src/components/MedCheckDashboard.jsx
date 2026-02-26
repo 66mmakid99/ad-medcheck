@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import PriceAnalytics from './PriceAnalytics';
+import AeoGeoDashboard from './AeoGeoDashboard';
 
 // ============================================
 // MEDCHECK Engine 대시보드 v2.0 - 레퍼런스 스타일
@@ -111,6 +112,7 @@ export default function MedCheckDashboard() {
     { id: 'priceAnalytics', name: '가격분석', icon: '📊' },
     { id: 'ocr', name: 'OCR 분석', icon: '🖼️' },
     { id: 'crawler', name: '크롤러 현황', icon: '🕷️' },
+    { id: 'aeoGeo', name: 'AG MedCheck', icon: '🤖' },
   ];
 
   if (loading) {
@@ -291,6 +293,7 @@ export default function MedCheckDashboard() {
           {activeTab === 'priceAnalytics' && <PriceAnalytics />}
           {activeTab === 'ocr' && <OcrTab apiBase={API_BASE} />}
           {activeTab === 'crawler' && <CrawlerTab apiBase={API_BASE} />}
+          {activeTab === 'aeoGeo' && <AeoGeoDashboard />}
         </main>
       </div>
     </div>
@@ -529,13 +532,48 @@ function OverviewPage({ apiBase, onNavigate }) {
 
   const loadData = async () => {
     setLoading(true);
-    await Promise.all([
-      fetch(`${apiBase}/api/ocr/results?limit=10`).then(r => r.json()).then(d => { if (d.success) setOcrResults(d.data?.results || d.data || []); }).catch(() => {}),
-      fetch(`${apiBase}/api/ocr/accuracy/stats`).then(r => r.json()).then(d => { if (d.success) setAccuracyStats(d.data); }).catch(() => {}),
-      fetch(`${apiBase}/api/crawler/status`).then(r => r.json()).then(d => { if (d.success) setCrawlerStatus(d.data); }).catch(() => {}),
-      fetch(`${apiBase}/v1/analysis-results/stats`).then(r => r.json()).then(d => { if (d.success) setAnalysisStats(d.data); }).catch(() => {}),
-      fetch(`${apiBase}/v1/health`).then(r => r.json()).then(d => setHealthData(d)).catch(() => {}),
-    ]);
+    try {
+      // 신규 통합 요약 API (기존 5개 호출 → 1개로 통합)
+      const summaryRes = await fetch(`${apiBase}/v1/dashboard/summary`);
+      const summaryData = await summaryRes.json();
+      if (summaryData.success) {
+        const d = summaryData.data;
+        // 크롤러 상태 매핑
+        setCrawlerStatus({
+          schedulerOnline: d.crawler?.online,
+          mode: d.crawler?.mode || 'cloud',
+          lastHeartbeat: d.crawler?.lastHeartbeat,
+          lastCrawl: d.recentBatch ? { started_at: d.recentBatch.started_at } : null,
+          todaySummary: { runs: d.recentBatch ? 1 : 0 },
+        });
+        // 분석 통계 매핑
+        setAnalysisStats({
+          total: d.today?.analyzed || 0,
+          violations: d.today?.violations || 0,
+          avgScore: d.today?.avgScore || 0,
+          clean: (d.today?.analyzed || 0) - (d.today?.violations || 0),
+          byDate: [],
+          gradeDistribution: d.gradeDistribution || [],
+        });
+        // 최근 분석 결과를 테이블에 표시
+        setOcrResults((d.recentResults || []).map(r => ({
+          id: r.hospital_name,
+          extracted_text: r.hospital_name,
+          grade: r.grade,
+          violations: r.violation_count,
+          analyzed_at: r.analyzed_at,
+          url: r.url_analyzed,
+          grade_emoji: r.grade_emoji,
+          clean_score: r.clean_score,
+        })));
+        // 정확도는 신규 API에서 아직 미제공 → 기본값
+        setAccuracyStats(null);
+      }
+      // 헬스체크는 유지
+      fetch(`${apiBase}/v1/health`).then(r => r.json()).then(d => setHealthData(d)).catch(() => {});
+    } catch (e) {
+      console.error('Dashboard load error:', e);
+    }
     setLoading(false);
   };
 
@@ -633,11 +671,11 @@ function OverviewPage({ apiBase, onNavigate }) {
           <div className="w-12 h-12 rounded-xl bg-emerald-50 flex items-center justify-center text-2xl shrink-0">🕷️</div>
           <div className="min-w-0">
             <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">크롤러 상태</div>
-            <div className={`text-2xl font-bold mt-0.5 ${isOnline ? 'text-emerald-600' : 'text-red-500'}`}>
-              {isOnline ? '온라인' : '오프라인'}
+            <div className={`text-2xl font-bold mt-0.5 ${isOnline ? 'text-emerald-600' : 'text-slate-600'}`}>
+              {isOnline ? '온라인' : crawlerStatus?.mode === 'cloud' ? '⏰ Cron 대기' : '오프라인'}
             </div>
             <div className="text-xs text-slate-400 mt-0.5">
-              마지막 실행: {formatTime(lastCrawlTime)}
+              마지막 실행: {formatTime(lastCrawlTime)} {crawlerStatus?.mode === 'cloud' && '(클라우드)'}
             </div>
           </div>
         </div>
@@ -683,31 +721,22 @@ function OverviewPage({ apiBase, onNavigate }) {
               <thead className="bg-slate-50/80">
                 <tr>
                   <th className="text-left p-3 pl-6 font-medium text-slate-500 text-xs uppercase tracking-wider">시간</th>
-                  <th className="text-left p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">내용</th>
+                  <th className="text-left p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">병원</th>
                   <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">등급</th>
+                  <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">청정지수</th>
                   <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">위반 수</th>
-                  <th className="text-center p-3 font-medium text-slate-500 text-xs uppercase tracking-wider">분석모드</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {ocrResults.map((r, i) => {
-                  const violations = typeof r.violations === 'string' ? JSON.parse(r.violations || '[]') : (r.violations || []);
-                  const vCount = Array.isArray(violations) ? violations.length : 0;
-                  const preview = r.image_url
-                    ? r.image_url.slice(0, 50) + (r.image_url.length > 50 ? '...' : '')
-                    : (r.extracted_text || '-').slice(0, 50) + ((r.extracted_text || '').length > 50 ? '...' : '');
-                  return (
-                    <tr key={r.id || i} className={`${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'} hover:bg-blue-50/30 transition-colors`}>
-                      <td className="p-3 pl-6 text-slate-600 whitespace-nowrap">{formatTime(r.created_at)}</td>
-                      <td className="p-3 text-slate-700 max-w-xs truncate font-mono text-xs">{preview}</td>
-                      <td className="p-3 text-center">{gradeBadge(r.grade)}</td>
-                      <td className="p-3 text-center">
-                        <span className={`font-semibold ${vCount > 0 ? 'text-red-600' : 'text-slate-400'}`}>{vCount}</span>
-                      </td>
-                      <td className="p-3 text-center">{modeBadge(r.analysis_mode)}</td>
-                    </tr>
-                  );
-                })}
+                {ocrResults.map((r, i) => (
+                  <tr key={r.id || i} className={`${i % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'} hover:bg-blue-50/30 transition-colors`}>
+                    <td className="p-3 pl-6 text-sm text-slate-500">{formatTime(r.analyzed_at)}</td>
+                    <td className="p-3 text-sm font-medium text-slate-700">{r.extracted_text}</td>
+                    <td className="text-center">{gradeBadge(r.grade)}</td>
+                    <td className="p-3 text-center text-sm font-medium">{r.clean_score || '-'}점</td>
+                    <td className="p-3 text-center text-sm text-red-500 font-medium">{r.violations || 0}건</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -750,14 +779,14 @@ function OverviewPage({ apiBase, onNavigate }) {
             <div className="flex items-center gap-3 p-3 rounded-xl bg-slate-50 border border-slate-100">
               <div className="w-9 h-9 rounded-lg bg-emerald-100 flex items-center justify-center text-lg">🕷️</div>
               <div className="flex-1 min-w-0">
-                <div className="text-sm font-medium text-slate-700">크롤러</div>
+                <div className="text-sm font-medium text-slate-700">클라우드 크롤러</div>
                 <div className="text-xs text-slate-400 mt-0.5">
-                  다음 예정: {formatTime(crawlerStatus?.schedulerInfo?.nextScheduledRun)}
+                  Cron: 매일 09:00 KST
                   <span className="mx-1.5">·</span>
-                  오늘 {crawlerStatus?.todaySummary?.runs || 0}회 실행
+                  큐 대기: {analysisStats?.gradeDistribution ? '활성' : '확인 중'}
                 </div>
               </div>
-              <div className={`w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-400' : 'bg-red-400'}`} />
+              <div className={`w-2.5 h-2.5 rounded-full ${crawlerStatus?.mode === 'cloud' || isOnline ? 'bg-emerald-400' : 'bg-amber-400'}`} />
             </div>
 
             {/* API 상태 */}
@@ -896,20 +925,51 @@ function AnalyzeTab({ apiBase }) {
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
   const [enableAI, setEnableAI] = useState(false);
+  const [mode, setMode] = useState('text'); // 'text' | 'url'
+  const [url, setUrl] = useState('');
+  const [hospitalName, setHospitalName] = useState('');
 
   const analyze = async () => {
-    if (!text.trim()) return;
+    if (mode === 'text' && !text.trim()) return;
+    if (mode === 'url' && !url.trim()) return;
     setLoading(true);
     try {
-      const res = await fetch(`${apiBase}/v1/analyze`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, enableAI, options: { detailed: true } })
-      });
-      const data = await res.json();
-      if (data.success) setResult(data.data);
+      let res;
+      if (mode === 'url') {
+        // URL 분석 (파이프라인 → DB 저장)
+        res = await fetch(`${apiBase}/v1/pipeline/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url, hospitalName: hospitalName || undefined, enableAI })
+        });
+        const data = await res.json();
+        if (data.success && data.analysis) {
+          setResult({
+            grade: data.analysis.grade,
+            score: { cleanScore: data.analysis.cleanScore, gradeInfo: { emoji: data.analysis.gradeEmoji, status: data.analysis.gradeLabel || data.analysis.grade } },
+            violationCount: data.analysis.violationCount,
+            violations: data.analysis.violations,
+            rawViolationCount: data.analysis.rawViolationCount,
+            filteredCount: data.analysis.filteredCount,
+            aiVerification: data.analysis.aiVerification,
+            meta: data.meta,
+          });
+        } else {
+          setResult({ error: data.error?.message || '분석 실패' });
+        }
+      } else {
+        // 기존 텍스트 분석 유지
+        res = await fetch(`${apiBase}/v1/analyze`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, enableAI, options: { detailed: true } })
+        });
+        const data = await res.json();
+        if (data.success) setResult(data.data);
+      }
     } catch (e) {
       console.error(e);
+      setResult({ error: '네트워크 오류' });
     }
     setLoading(false);
   };
@@ -937,12 +997,34 @@ function AnalyzeTab({ apiBase }) {
         {/* 입력 영역 */}
         <div className="col-span-2 bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
           <h3 className="text-lg font-bold text-slate-800 mb-4">🔍 실시간 광고 분석</h3>
-          <textarea
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            placeholder="분석할 광고 텍스트를 입력하세요..."
-            className="w-full h-40 bg-slate-50 border border-slate-200 rounded-xl p-4 text-slate-700 placeholder-slate-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
-          />
+          {/* 모드 토글 */}
+          <div className="flex gap-2 mb-4">
+            <button onClick={() => setMode('text')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === 'text' ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+              📝 텍스트 분석
+            </button>
+            <button onClick={() => setMode('url')}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === 'url' ? 'bg-blue-500 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>
+              🌐 URL 분석
+            </button>
+          </div>
+          {mode === 'url' ? (
+            <div className="space-y-3">
+              <input value={url} onChange={e => setUrl(e.target.value)}
+                placeholder="https://example-hospital.com"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" />
+              <input value={hospitalName} onChange={e => setHospitalName(e.target.value)}
+                placeholder="병원명 (선택 - 입력 시 DB에 저장)"
+                className="w-full bg-slate-50 border border-slate-200 rounded-xl p-4 text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400" />
+            </div>
+          ) : (
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder="분석할 광고 텍스트를 입력하세요..."
+              className="w-full h-40 bg-slate-50 border border-slate-200 rounded-xl p-4 text-slate-700 placeholder-slate-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-400"
+            />
+          )}
           <div className="flex items-center justify-between mt-4">
             <label className="flex items-center gap-3 cursor-pointer">
               <input
@@ -951,14 +1033,14 @@ function AnalyzeTab({ apiBase }) {
                 onChange={(e) => setEnableAI(e.target.checked)}
                 className="w-5 h-5 rounded border-slate-300 text-blue-500 focus:ring-blue-400"
               />
-              <span className="text-slate-600">AI 분석 (Claude)</span>
+              <span className="text-slate-600">AI 2차 검증 (Gemini)</span>
             </label>
             <button
               onClick={analyze}
-              disabled={loading || !text.trim()}
+              disabled={loading || (mode === 'text' ? !text.trim() : !url.trim())}
               className="px-6 py-3 bg-gradient-to-r from-blue-500 to-indigo-600 text-white rounded-xl font-medium shadow-lg shadow-blue-500/25 hover:shadow-blue-500/40 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
             >
-              {loading ? '분석 중...' : '분석하기'}
+              {loading ? '분석 중...' : mode === 'url' ? 'URL 분석하기' : '분석하기'}
             </button>
           </div>
         </div>
@@ -984,6 +1066,28 @@ function AnalyzeTab({ apiBase }) {
                   <span className="text-slate-500">위반 항목</span>
                   <span className="font-bold text-red-600">{result.violationCount || 0}건</span>
                 </div>
+                {result?.rawViolationCount != null && (
+                  <div className="flex justify-between p-3 bg-emerald-50 rounded-lg">
+                    <span className="text-slate-500">오탐 필터링</span>
+                    <span className="font-bold text-emerald-600">
+                      {result.rawViolationCount}건 → {result.rawViolationCount - (result.filteredCount || 0)}건
+                      ({result.filteredCount || 0}건 제거)
+                    </span>
+                  </div>
+                )}
+                {result?.aiVerification?.verified && (
+                  <div className="flex justify-between p-3 bg-purple-50 rounded-lg">
+                    <span className="text-slate-500">AI 검증</span>
+                    <span className="font-bold text-purple-600">
+                      확정 {result.aiVerification.confirmedCount}건 / 오탐 {result.aiVerification.falsePositiveCount}건
+                    </span>
+                  </div>
+                )}
+                {result?.error && (
+                  <div className="flex justify-between p-3 bg-red-50 rounded-lg">
+                    <span className="text-red-500">{result.error}</span>
+                  </div>
+                )}
               </div>
             </div>
           ) : (
@@ -1045,17 +1149,19 @@ function AdCheckTab({ apiBase }) {
   const loadData = async () => {
     setLoading(true);
     try {
-      let url = `${apiBase}/v1/analysis-results?limit=100`;
+      let url = `${apiBase}/v1/dashboard/hospitals?limit=100`;
       if (filter.grade) url += `&grade=${filter.grade}`;
-      if (filter.sido) url += `&sido=${filter.sido}`;
 
-      const [resultsRes, statsRes] = await Promise.all([
-        fetch(url).then(r => r.json()),
-        fetch(`${apiBase}/v1/analysis-results/stats`).then(r => r.json())
-      ]);
-
-      if (resultsRes.success) setHospitals(resultsRes.data || []);
-      if (statsRes.success) setStats(statsRes.data);
+      const resultsRes = await fetch(url).then(r => r.json());
+      if (resultsRes.success) {
+        // data가 배열일 수도, {hospitals:[], pagination:{}} 객체일 수도 있음
+        const items = Array.isArray(resultsRes.data)
+          ? resultsRes.data
+          : (resultsRes.data?.hospitals || resultsRes.data?.results || []);
+        setHospitals(items);
+        const total = resultsRes.data?.pagination?.total || items.length;
+        setStats({ total });
+      }
     } catch (e) {
       console.error(e);
     }
@@ -1064,11 +1170,29 @@ function AdCheckTab({ apiBase }) {
 
   const loadHospitalDetail = async (id) => {
     try {
-      const res = await fetch(`${apiBase}/v1/analysis-results/${id}`);
+      const res = await fetch(`${apiBase}/v1/analysis-history/${id}`);
       const data = await res.json();
-      if (data.success) {
-        setHospitalDetail(data.data);
+      if (data.success && data.data?.length > 0) {
+        const latest = data.data[0];
+        setHospitalDetail({
+          ...latest,
+          violations: typeof latest.violations_json === 'string'
+            ? JSON.parse(latest.violations_json || '[]')
+            : (latest.violations_json || []),
+        });
         setSelectedHospital(id);
+      } else {
+        // fallback: 목록에서 직접 찾기
+        const h = hospitals.find(h => h.id === id || h.hospital_id === id);
+        if (h) {
+          setHospitalDetail({
+            ...h,
+            violations: typeof h.violations_json === 'string'
+              ? JSON.parse(h.violations_json || '[]')
+              : (h.violations || []),
+          });
+          setSelectedHospital(id);
+        }
       }
     } catch (e) {
       console.error(e);
@@ -1131,14 +1255,14 @@ function AdCheckTab({ apiBase }) {
             <div className="divide-y divide-slate-100 max-h-[500px] overflow-y-auto">
               {hospitals.map((h, i) => (
                 <div
-                  key={h.id || i}
-                  onClick={() => loadHospitalDetail(h.id)}
-                  className={`p-4 cursor-pointer transition-colors ${selectedHospital === h.id ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
+                  key={h.id || h.hospital_id || i}
+                  onClick={() => loadHospitalDetail(h.hospital_id || h.id)}
+                  className={`p-4 cursor-pointer transition-colors ${selectedHospital === (h.hospital_id || h.id) ? 'bg-blue-50' : 'hover:bg-slate-50'}`}
                 >
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="font-medium text-slate-800">{h.hospital_name}</p>
-                      <p className="text-slate-400 text-sm">{h.sido} {h.sigungu}</p>
+                      <p className="text-slate-400 text-sm">{h.region || `${h.sido || ''} ${h.sigungu || ''}`.trim() || '-'}</p>
                     </div>
                     <div className="text-right">
                       <span className={`px-3 py-1 rounded-lg font-bold text-sm ${gradeColors[h.grade]?.bg} ${gradeColors[h.grade]?.text}`}>
@@ -2765,26 +2889,34 @@ function CrawlerTab({ apiBase }) {
 
   const loadStatus = async () => {
     try {
-      const res = await fetch(`${apiBase}/api/crawler/status`);
+      const res = await fetch(`${apiBase}/v1/dashboard/summary`);
       const d = await res.json();
-      if (d.success) setStatus(d.data);
+      if (d.success) {
+        setStatus({
+          schedulerOnline: d.data.crawler?.online,
+          mode: d.data.crawler?.mode || 'cloud',
+          lastHeartbeat: d.data.crawler?.lastHeartbeat,
+          lastCrawl: d.data.recentBatch ? { started_at: d.data.recentBatch.started_at } : null,
+          queue: d.data.queue,
+          recentBatch: d.data.recentBatch,
+          todaySummary: { runs: d.data.recentBatch ? 1 : 0, completed: d.data.recentBatch?.status === 'completed' ? 1 : 0 },
+          pendingTriggers: d.data.queue?.pending || 0,
+        });
+      }
     } catch (e) { /* ignore */ }
   };
 
   const loadLogs = async () => {
     try {
-      const res = await fetch(`${apiBase}/api/crawler/logs?limit=30`);
+      const res = await fetch(`${apiBase}/v1/crawl-batches?limit=30`);
       const d = await res.json();
       if (d.success) setLogs(d.data || []);
     } catch (e) { /* ignore */ }
   };
 
   const loadRunningJobs = async () => {
-    try {
-      const res = await fetch(`${apiBase}/api/crawler/jobs/running`);
-      const d = await res.json();
-      if (d.success) setRunningJobs(d.data || []);
-    } catch (e) { /* ignore */ }
+    // 클라우드 모드에서는 running jobs API 불필요 (Cron이 관리)
+    setRunningJobs([]);
   };
 
   const loadLogDetail = async (logId) => {
@@ -2820,15 +2952,14 @@ function CrawlerTab({ apiBase }) {
     setTriggering(true);
     setTriggerResult(null);
     try {
-      const res = await fetch(`${apiBase}/api/crawler/trigger`, {
+      const res = await fetch(`${apiBase}/v1/dashboard/trigger-crawl`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ region: triggerRegion, enableAi: triggerAi }),
       });
       const d = await res.json();
       if (d.success) {
-        setTriggerResult({ type: 'success', message: `크롤링 트리거 등록 완료 (ID: ${d.data.id})` });
-        setTimeout(loadAll, 2000);
+        setTriggerResult({ type: 'success', message: '클라우드 크롤링이 시작되었습니다' });
+        setTimeout(loadAll, 5000);
       } else {
         setTriggerResult({ type: 'error', message: d.error || '트리거 실패' });
       }

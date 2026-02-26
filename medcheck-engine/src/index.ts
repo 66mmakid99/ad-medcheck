@@ -649,6 +649,44 @@ app.post('/v1/pipeline/analyze', async (c) => {
         apiKey,
       );
 
+      // Gemini 결과를 D1에 저장 (비동기, 실패해도 응답은 반환)
+      if (geminiResult.success && geminiResult.audit) {
+        try {
+          const a = geminiResult.audit;
+          const g = a.grade || {};
+          await c.env.DB.prepare(`
+            INSERT INTO gemini_analysis_results (
+              hospital_name, url, success, crawl_method, text_length,
+              grade, clean_score, violation_count, gray_zone_count,
+              critical_count, major_count, minor_count,
+              violations_json, gray_zones_json, mandatory_items_json, audit_issues_json,
+              fetch_time_ms, gemini_time_ms, total_time_ms
+            ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            body.hospitalName || '',
+            body.url,
+            geminiResult.meta?.crawlMethod || 'unknown',
+            geminiResult.meta?.textLength || 0,
+            g.grade || '-',
+            g.cleanScore || 0,
+            g.violationCount || 0,
+            (a.grayZones || []).length,
+            (a.finalViolations || []).filter((v: any) => v.severity === 'critical' || v.adjustedSeverity === 'critical').length,
+            (a.finalViolations || []).filter((v: any) => (v.adjustedSeverity || v.severity) === 'major').length,
+            (a.finalViolations || []).filter((v: any) => (v.adjustedSeverity || v.severity) === 'minor').length,
+            JSON.stringify(a.finalViolations || []),
+            JSON.stringify(a.grayZones || []),
+            JSON.stringify(a.mandatoryItems || {}),
+            JSON.stringify(a.auditIssues || []),
+            geminiResult.meta?.fetchTimeMs || 0,
+            geminiResult.meta?.geminiTimeMs || 0,
+            geminiResult.meta?.totalTimeMs || 0,
+          ).run();
+        } catch (saveErr) {
+          console.error('[GeminiPipeline] D1 save failed:', (saveErr as Error).message);
+        }
+      }
+
       return c.json(geminiResult);
     }
 
@@ -979,6 +1017,331 @@ app.get('/v1/analysis-history/:hospitalId', async (c) => {
     return c.json({
       success: false,
       error: { code: 'QUERY_ERROR', message: (error as Error).message },
+    }, 500);
+  }
+});
+
+// ============================================
+// [Gemini Dashboard] 대시보드용 Gemini 분석 결과 API
+// ============================================
+
+/**
+ * GET /v1/dashboard/gemini-summary
+ * Gemini 분석 결과 전체 요약 (대시보드 Overview)
+ */
+app.get('/v1/dashboard/gemini-summary', async (c) => {
+  try {
+    const db = c.env.DB;
+
+    // 전체 통계
+    const stats = await db.prepare(`
+      SELECT
+        COUNT(*) as total_hospitals,
+        ROUND(AVG(clean_score), 1) as avg_clean_score,
+        SUM(violation_count) as total_violations,
+        SUM(gray_zone_count) as total_gray_zones,
+        MAX(analyzed_at) as last_batch_at
+      FROM gemini_analysis_results
+      WHERE success = 1
+    `).first();
+
+    // 등급 분포 (최신 분석만 — URL별 최신 1건)
+    const grades = await db.prepare(`
+      SELECT grade, COUNT(*) as count
+      FROM gemini_analysis_results g
+      INNER JOIN (
+        SELECT url, MAX(analyzed_at) as latest
+        FROM gemini_analysis_results WHERE success = 1
+        GROUP BY url
+      ) l ON g.url = l.url AND g.analyzed_at = l.latest
+      WHERE g.success = 1
+      GROUP BY grade
+      ORDER BY CASE grade
+        WHEN 'S' THEN 1 WHEN 'A' THEN 2 WHEN 'B' THEN 3
+        WHEN 'C' THEN 4 WHEN 'D' THEN 5 WHEN 'F' THEN 6
+        ELSE 7 END
+    `).all();
+
+    const gradeDistribution: Record<string, number> = {};
+    for (const row of (grades.results || [])) {
+      gradeDistribution[row.grade as string] = row.count as number;
+    }
+
+    // 위반 카테고리 Top 10
+    const topCategories = await db.prepare(`
+      SELECT json_extract(v.value, '$.category') as category,
+             COUNT(*) as count
+      FROM gemini_analysis_results g,
+           json_each(g.violations_json) v
+      WHERE g.success = 1
+        AND json_extract(v.value, '$.category') IS NOT NULL
+      GROUP BY category
+      ORDER BY count DESC
+      LIMIT 10
+    `).all();
+
+    return c.json({
+      success: true,
+      data: {
+        totalHospitals: stats?.total_hospitals || 0,
+        gradeDistribution,
+        avgCleanScore: stats?.avg_clean_score || 0,
+        totalViolations: stats?.total_violations || 0,
+        totalGrayZones: stats?.total_gray_zones || 0,
+        lastBatchAt: stats?.last_batch_at || null,
+        topViolationCategories: (topCategories.results || []).map((r: any) => ({
+          category: r.category,
+          count: r.count,
+        })),
+      },
+    });
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: { code: 'SUMMARY_ERROR', message: (error as Error).message },
+    }, 500);
+  }
+});
+
+/**
+ * GET /v1/dashboard/gemini-hospitals
+ * 병원 목록 (정렬, 필터, 페이지네이션)
+ */
+app.get('/v1/dashboard/gemini-hospitals', async (c) => {
+  try {
+    const db = c.env.DB;
+    const sort = c.req.query('sort') || 'clean_score';
+    const order = c.req.query('order') || 'asc';
+    const limit = Math.min(parseInt(c.req.query('limit') || '50'), 200);
+    const page = parseInt(c.req.query('page') || '1');
+    const gradeFilter = c.req.query('grade');
+    const offset = (page - 1) * limit;
+
+    // 허용된 정렬 컬럼
+    const allowedSorts: Record<string, string> = {
+      clean_score: 'g.clean_score',
+      grade: "CASE g.grade WHEN 'S' THEN 1 WHEN 'A' THEN 2 WHEN 'B' THEN 3 WHEN 'C' THEN 4 WHEN 'D' THEN 5 WHEN 'F' THEN 6 ELSE 7 END",
+      violation_count: 'g.violation_count',
+      analyzed_at: 'g.analyzed_at',
+      hospital_name: 'g.hospital_name',
+    };
+    const sortCol = allowedSorts[sort] || 'g.clean_score';
+    const sortOrder = order.toUpperCase() === 'DESC' ? 'DESC' : 'ASC';
+
+    let whereClause = 'WHERE g.success = 1';
+    const params: any[] = [];
+    if (gradeFilter) {
+      whereClause += ' AND g.grade = ?';
+      params.push(gradeFilter);
+    }
+
+    const query = `
+      SELECT g.id, g.hospital_name, g.url, g.grade, g.clean_score,
+             g.violation_count, g.gray_zone_count, g.crawl_method,
+             g.critical_count, g.major_count, g.minor_count,
+             g.violations_json, g.analyzed_at, g.total_time_ms
+      FROM gemini_analysis_results g
+      INNER JOIN (
+        SELECT url, MAX(analyzed_at) as latest
+        FROM gemini_analysis_results WHERE success = 1
+        GROUP BY url
+      ) l ON g.url = l.url AND g.analyzed_at = l.latest
+      ${whereClause}
+      ORDER BY ${sortCol} ${sortOrder}
+      LIMIT ? OFFSET ?
+    `;
+    params.push(limit, offset);
+
+    const results = await db.prepare(query).bind(...params).all();
+
+    // 각 병원의 상위 3건 위반 추출
+    const hospitals = (results.results || []).map((r: any) => {
+      let topViolations: any[] = [];
+      try {
+        const violations = JSON.parse(r.violations_json || '[]');
+        topViolations = violations.slice(0, 3).map((v: any) => ({
+          patternId: v.patternId,
+          category: v.category,
+          severity: v.adjustedSeverity || v.severity,
+          text: (v.originalText || '').substring(0, 80),
+        }));
+      } catch {}
+      return {
+        id: r.id,
+        hospitalName: r.hospital_name,
+        url: r.url,
+        grade: r.grade,
+        cleanScore: r.clean_score,
+        violationCount: r.violation_count,
+        grayZoneCount: r.gray_zone_count,
+        crawlMethod: r.crawl_method,
+        criticalCount: r.critical_count,
+        majorCount: r.major_count,
+        minorCount: r.minor_count,
+        analyzedAt: r.analyzed_at,
+        totalTimeMs: r.total_time_ms,
+        topViolations,
+      };
+    });
+
+    // 전체 수
+    const countResult = await db.prepare(`
+      SELECT COUNT(*) as total FROM (
+        SELECT url FROM gemini_analysis_results
+        WHERE success = 1 ${gradeFilter ? 'AND grade = ?' : ''}
+        GROUP BY url
+      )
+    `).bind(...(gradeFilter ? [gradeFilter] : [])).first();
+
+    return c.json({
+      success: true,
+      data: {
+        hospitals,
+        pagination: {
+          page,
+          limit,
+          total: countResult?.total || 0,
+          totalPages: Math.ceil((countResult?.total as number || 0) / limit),
+        },
+      },
+    });
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: { code: 'QUERY_ERROR', message: (error as Error).message },
+    }, 500);
+  }
+});
+
+/**
+ * GET /v1/dashboard/gemini-hospital/:id
+ * 개별 병원 상세 분석 결과
+ */
+app.get('/v1/dashboard/gemini-hospital/:id', async (c) => {
+  try {
+    const db = c.env.DB;
+    const id = c.req.param('id');
+
+    const result = await db.prepare(`
+      SELECT * FROM gemini_analysis_results WHERE id = ?
+    `).bind(id).first();
+
+    if (!result) {
+      return c.json({ success: false, error: { code: 'NOT_FOUND', message: '분석 결과를 찾을 수 없습니다' } }, 404);
+    }
+
+    let violations = [];
+    let grayZones = [];
+    let mandatoryItems = {};
+    let auditIssues = [];
+    try { violations = JSON.parse(result.violations_json as string || '[]'); } catch {}
+    try { grayZones = JSON.parse(result.gray_zones_json as string || '[]'); } catch {}
+    try { mandatoryItems = JSON.parse(result.mandatory_items_json as string || '{}'); } catch {}
+    try { auditIssues = JSON.parse(result.audit_issues_json as string || '[]'); } catch {}
+
+    return c.json({
+      success: true,
+      data: {
+        id: result.id,
+        hospitalName: result.hospital_name,
+        url: result.url,
+        grade: result.grade,
+        cleanScore: result.clean_score,
+        violationCount: result.violation_count,
+        grayZoneCount: result.gray_zone_count,
+        criticalCount: result.critical_count,
+        majorCount: result.major_count,
+        minorCount: result.minor_count,
+        crawlMethod: result.crawl_method,
+        textLength: result.text_length,
+        fetchTimeMs: result.fetch_time_ms,
+        geminiTimeMs: result.gemini_time_ms,
+        totalTimeMs: result.total_time_ms,
+        analyzedAt: result.analyzed_at,
+        violations,
+        grayZones,
+        mandatoryItems,
+        auditIssues,
+      },
+    });
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: { code: 'QUERY_ERROR', message: (error as Error).message },
+    }, 500);
+  }
+});
+
+/**
+ * POST /v1/dashboard/gemini-import
+ * 배치 분석 JSON 결과를 D1에 벌크 임포트
+ */
+app.post('/v1/dashboard/gemini-import', async (c) => {
+  try {
+    const db = c.env.DB;
+    const body = await c.req.json<{
+      results: any[];
+      batchId?: string;
+    }>();
+
+    if (!body.results || !Array.isArray(body.results)) {
+      return c.json({ success: false, error: { code: 'INVALID_INPUT', message: 'results 배열 필수' } }, 400);
+    }
+
+    const batchId = body.batchId || new Date().toISOString();
+    let imported = 0;
+    let skipped = 0;
+
+    for (const r of body.results) {
+      if (!r.url) { skipped++; continue; }
+
+      try {
+        await db.prepare(`
+          INSERT INTO gemini_analysis_results (
+            hospital_name, url, success, crawl_method, text_length,
+            grade, clean_score, violation_count, gray_zone_count,
+            critical_count, major_count, minor_count,
+            violations_json, gray_zones_json, mandatory_items_json, audit_issues_json,
+            fetch_time_ms, gemini_time_ms, total_time_ms, error_message, batch_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          r.hospitalName || r.hospital_name || '',
+          r.url,
+          r.success ? 1 : 0,
+          r.crawlMethod || r.crawl_method || 'unknown',
+          r.textLength || r.text_length || 0,
+          r.grade || '-',
+          r.cleanScore ?? r.clean_score ?? 0,
+          r.violationCount ?? r.violation_count ?? 0,
+          r.grayZones ?? r.gray_zone_count ?? 0,
+          r.criticalCount ?? r.critical_count ?? 0,
+          r.majorCount ?? r.major_count ?? 0,
+          r.minorCount ?? r.minor_count ?? 0,
+          JSON.stringify(r.violations || []),
+          JSON.stringify(r.grayZones_data || r.gray_zones || []),
+          JSON.stringify(r.mandatoryItems || r.mandatory_items || {}),
+          JSON.stringify(r.auditIssues || r.audit_issues || []),
+          r.fetchTimeMs ?? r.fetch_time_ms ?? 0,
+          r.geminiTimeMs ?? r.gemini_time_ms ?? 0,
+          r.totalTimeMs ?? r.total_time_ms ?? 0,
+          r.error || r.error_message || null,
+          batchId,
+        ).run();
+        imported++;
+      } catch (e) {
+        console.error(`Import error for ${r.url}:`, (e as Error).message);
+        skipped++;
+      }
+    }
+
+    return c.json({
+      success: true,
+      data: { imported, skipped, batchId },
+    });
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: { code: 'IMPORT_ERROR', message: (error as Error).message },
     }, 500);
   }
 });

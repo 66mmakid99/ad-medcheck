@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, BarChart, Bar, PieChart, Pie, Cell } from 'recharts';
 import PriceAnalytics from './PriceAnalytics';
 import AeoGeoDashboard from './AeoGeoDashboard';
 import ViralDashboard from './ViralDashboard';
@@ -113,6 +113,7 @@ export default function MedCheckDashboard() {
       icon: '🛡️',
       items: [
         { id: 'analyze', name: 'Ad MedCheck', icon: '🔍' },
+        { id: 'geminiAnalysis', name: 'Gemini 분석', icon: '🧠' },
         { id: 'adcheck', name: '에드체크', icon: '✅' },
         { id: 'aeoGeo', name: 'AG MedCheck', icon: '🤖' },
         { id: 'viral', name: 'Viral MedCheck', icon: '📣' },
@@ -307,6 +308,7 @@ export default function MedCheckDashboard() {
         {/* 메인 콘텐츠 영역 */}
         <main className="flex-1 overflow-auto p-6">
           {activeTab === 'home' && <OverviewPage apiBase={API_BASE} onNavigate={setActiveTab} />}
+          {activeTab === 'geminiAnalysis' && <GeminiAnalysisTab apiBase={API_BASE} />}
           {activeTab === 'analyze' && <UrlAnalysisPage apiBase={API_BASE} />}
           {activeTab === 'adcheck' && <AdCheckTab apiBase={API_BASE} />}
           {activeTab === 'pricing' && (
@@ -3754,6 +3756,577 @@ function CrawlerTab({ apiBase }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ============================================
+// Gemini 분석 결과 탭 (전체 현황 + 병원 목록 + 상세)
+// ============================================
+
+const GRADE_COLORS = {
+  S: { bg: 'bg-emerald-100', text: 'text-emerald-700', border: 'border-emerald-200', fill: '#10b981' },
+  A: { bg: 'bg-blue-100', text: 'text-blue-700', border: 'border-blue-200', fill: '#3b82f6' },
+  B: { bg: 'bg-cyan-100', text: 'text-cyan-700', border: 'border-cyan-200', fill: '#06b6d4' },
+  C: { bg: 'bg-yellow-100', text: 'text-yellow-700', border: 'border-yellow-200', fill: '#eab308' },
+  D: { bg: 'bg-orange-100', text: 'text-orange-700', border: 'border-orange-200', fill: '#f97316' },
+  F: { bg: 'bg-red-100', text: 'text-red-700', border: 'border-red-200', fill: '#ef4444' },
+};
+
+const SEVERITY_STYLES = {
+  critical: { bg: 'bg-red-100', text: 'text-red-700', label: '심각' },
+  major: { bg: 'bg-orange-100', text: 'text-orange-700', label: '중요' },
+  minor: { bg: 'bg-yellow-100', text: 'text-yellow-700', label: '경미' },
+};
+
+function GradeBadge({ grade, size = 'md' }) {
+  const g = GRADE_COLORS[grade] || { bg: 'bg-slate-100', text: 'text-slate-600', border: 'border-slate-200' };
+  const sizeClass = size === 'lg' ? 'w-14 h-14 text-2xl' : size === 'sm' ? 'w-7 h-7 text-xs' : 'w-9 h-9 text-sm';
+  return (
+    <span className={`inline-flex items-center justify-center font-bold rounded-xl ${sizeClass} ${g.bg} ${g.text} ${g.border} border`}>
+      {grade}
+    </span>
+  );
+}
+
+function GeminiAnalysisTab({ apiBase }) {
+  const [view, setView] = useState('overview'); // overview | hospitals | detail
+  const [summary, setSummary] = useState(null);
+  const [hospitals, setHospitals] = useState([]);
+  const [pagination, setPagination] = useState({ page: 1, total: 0, totalPages: 0 });
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [sortField, setSortField] = useState('clean_score');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [gradeFilter, setGradeFilter] = useState('');
+
+  useEffect(() => { loadSummary(); loadHospitals(); }, []);
+
+  const loadSummary = async () => {
+    try {
+      const res = await fetch(`${apiBase}/v1/dashboard/gemini-summary`);
+      const d = await res.json();
+      if (d.success) setSummary(d.data);
+    } catch {}
+  };
+
+  const loadHospitals = async (page = 1) => {
+    setLoading(true);
+    try {
+      let url = `${apiBase}/v1/dashboard/gemini-hospitals?sort=${sortField}&order=${sortOrder}&limit=50&page=${page}`;
+      if (gradeFilter) url += `&grade=${gradeFilter}`;
+      const res = await fetch(url);
+      const d = await res.json();
+      if (d.success) {
+        setHospitals(d.data.hospitals);
+        setPagination(d.data.pagination);
+      }
+    } catch {}
+    setLoading(false);
+  };
+
+  useEffect(() => { loadHospitals(); }, [sortField, sortOrder, gradeFilter]);
+
+  const loadDetail = async (id) => {
+    try {
+      const res = await fetch(`${apiBase}/v1/dashboard/gemini-hospital/${id}`);
+      const d = await res.json();
+      if (d.success) {
+        setDetail(d.data);
+        setView('detail');
+      }
+    } catch {}
+  };
+
+  const handleSort = (field) => {
+    if (sortField === field) {
+      setSortOrder(prev => prev === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortField(field);
+      setSortOrder(field === 'hospital_name' ? 'asc' : 'asc');
+    }
+  };
+
+  // ━━ Overview 탭 ━━
+  const renderOverview = () => {
+    if (!summary) return <div className="text-center py-12 text-slate-400">로딩 중...</div>;
+
+    const gradeData = Object.entries(summary.gradeDistribution).map(([grade, count]) => ({
+      name: grade, value: count, fill: GRADE_COLORS[grade]?.fill || '#94a3b8'
+    }));
+
+    const categoryData = (summary.topViolationCategories || []).slice(0, 7);
+
+    return (
+      <div className="space-y-6">
+        {/* 상단 통계 카드 */}
+        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <p className="text-slate-500 text-sm mb-1">분석 병원</p>
+            <p className="text-3xl font-bold text-blue-600">{summary.totalHospitals}</p>
+          </div>
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <p className="text-slate-500 text-sm mb-1">평균 cleanScore</p>
+            <p className="text-3xl font-bold text-cyan-600">{summary.avgCleanScore}</p>
+            <p className="text-xs text-slate-400 mt-1">100점 만점</p>
+          </div>
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <p className="text-slate-500 text-sm mb-1">총 위반 건수</p>
+            <p className="text-3xl font-bold text-red-600">{summary.totalViolations}</p>
+          </div>
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <p className="text-slate-500 text-sm mb-1">Gray Zone</p>
+            <p className="text-3xl font-bold text-yellow-600">{summary.totalGrayZones}</p>
+          </div>
+          <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm">
+            <p className="text-slate-500 text-sm mb-1">마지막 분석</p>
+            <p className="text-lg font-bold text-slate-700">
+              {summary.lastBatchAt ? new Date(summary.lastBatchAt).toLocaleDateString('ko-KR') : '-'}
+            </p>
+            <p className="text-xs text-slate-400 mt-1">
+              {summary.lastBatchAt ? new Date(summary.lastBatchAt).toLocaleTimeString('ko-KR') : ''}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* 등급 분포 차트 */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+            <h3 className="text-lg font-bold text-slate-800 mb-4">등급 분포</h3>
+            <div className="flex items-center gap-6">
+              <div className="w-48 h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie data={gradeData} cx="50%" cy="50%" innerRadius={45} outerRadius={75} paddingAngle={3} dataKey="value">
+                      {gradeData.map((entry, i) => (
+                        <Cell key={i} fill={entry.fill} />
+                      ))}
+                    </Pie>
+                    <Tooltip formatter={(value, name) => [`${value}개`, `${name}등급`]} />
+                  </PieChart>
+                </ResponsiveContainer>
+              </div>
+              <div className="flex-1 space-y-2">
+                {gradeData.map(({ name, value, fill }) => (
+                  <div key={name} className="flex items-center gap-3">
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: fill }} />
+                    <span className="text-sm font-medium text-slate-700 w-6">{name}</span>
+                    <div className="flex-1 bg-slate-100 rounded-full h-3 overflow-hidden">
+                      <div className="h-full rounded-full transition-all duration-500" style={{ backgroundColor: fill, width: `${(value / summary.totalHospitals) * 100}%` }} />
+                    </div>
+                    <span className="text-sm font-bold text-slate-800 w-8 text-right">{value}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* 위반 카테고리 Top */}
+          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+            <h3 className="text-lg font-bold text-slate-800 mb-4">위반 카테고리 Top {categoryData.length}</h3>
+            {categoryData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={220}>
+                <BarChart data={categoryData} layout="vertical" margin={{ left: 80, right: 20, top: 5, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} />
+                  <XAxis type="number" />
+                  <YAxis dataKey="category" type="category" tick={{ fontSize: 12 }} width={75} />
+                  <Tooltip formatter={(value) => [`${value}건`, '위반 수']} />
+                  <Bar dataKey="count" fill="#6366f1" radius={[0, 4, 4, 0]} barSize={16} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="text-center py-12 text-slate-400">카테고리 데이터 없음</div>
+            )}
+          </div>
+        </div>
+
+        {/* 병원 목록 바로가기 */}
+        <div className="text-center">
+          <button
+            onClick={() => setView('hospitals')}
+            className="px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition-colors shadow-sm"
+          >
+            병원별 상세 목록 보기 ({summary.totalHospitals}개)
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  // ━━ Hospitals 탭 ━━
+  const renderHospitals = () => {
+    const SortHeader = ({ field, label }) => (
+      <th
+        onClick={() => handleSort(field)}
+        className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase tracking-wider cursor-pointer hover:text-slate-700 select-none"
+      >
+        {label}
+        {sortField === field && <span className="ml-1">{sortOrder === 'asc' ? '▲' : '▼'}</span>}
+      </th>
+    );
+
+    return (
+      <div className="space-y-4">
+        {/* 필터/네비 바 */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <button onClick={() => setView('overview')} className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+              ← Overview
+            </button>
+            <span className="text-slate-300">|</span>
+            <span className="text-sm text-slate-600 font-medium">병원 목록 ({pagination.total}개)</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <select
+              value={gradeFilter}
+              onChange={e => setGradeFilter(e.target.value)}
+              className="text-sm bg-white border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+            >
+              <option value="">전체 등급</option>
+              {['S', 'A', 'B', 'C', 'D', 'F'].map(g => <option key={g} value={g}>{g}등급</option>)}
+            </select>
+          </div>
+        </div>
+
+        {/* 테이블 */}
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead className="bg-slate-50 border-b border-slate-200">
+                <tr>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase w-8">#</th>
+                  <SortHeader field="hospital_name" label="병원명" />
+                  <SortHeader field="grade" label="등급" />
+                  <SortHeader field="clean_score" label="점수" />
+                  <SortHeader field="violation_count" label="위반" />
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">심각도</th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold text-slate-500 uppercase">크롤</th>
+                  <SortHeader field="analyzed_at" label="분석일" />
+                  <th className="px-3 py-3" />
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {loading ? (
+                  <tr><td colSpan={9} className="text-center py-12 text-slate-400">
+                    <div className="w-6 h-6 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mx-auto mb-2" />
+                    로딩 중...
+                  </td></tr>
+                ) : hospitals.length === 0 ? (
+                  <tr><td colSpan={9} className="text-center py-12 text-slate-400">결과 없음</td></tr>
+                ) : hospitals.map((h, i) => (
+                  <tr key={h.id} className="hover:bg-slate-50/50 transition-colors cursor-pointer" onClick={() => loadDetail(h.id)}>
+                    <td className="px-3 py-3 text-xs text-slate-400">{(pagination.page - 1) * 50 + i + 1}</td>
+                    <td className="px-3 py-3">
+                      <div className="text-sm font-medium text-slate-800 truncate max-w-[200px]">{h.hospitalName}</div>
+                      <div className="text-xs text-slate-400 truncate max-w-[200px]">{h.url}</div>
+                    </td>
+                    <td className="px-3 py-3"><GradeBadge grade={h.grade} size="sm" /></td>
+                    <td className="px-3 py-3">
+                      <span className={`text-sm font-bold ${h.cleanScore >= 80 ? 'text-emerald-600' : h.cleanScore >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                        {h.cleanScore}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className="text-sm font-semibold text-red-600">{h.violationCount}</span>
+                    </td>
+                    <td className="px-3 py-3">
+                      <div className="flex gap-1">
+                        {h.criticalCount > 0 && <span className="px-1.5 py-0.5 bg-red-100 text-red-700 text-xs rounded font-medium">{h.criticalCount}C</span>}
+                        {h.majorCount > 0 && <span className="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded font-medium">{h.majorCount}M</span>}
+                        {h.minorCount > 0 && <span className="px-1.5 py-0.5 bg-yellow-100 text-yellow-700 text-xs rounded font-medium">{h.minorCount}m</span>}
+                      </div>
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${h.crawlMethod === 'firecrawl' ? 'bg-purple-100 text-purple-700' : 'bg-slate-100 text-slate-600'}`}>
+                        {h.crawlMethod}
+                      </span>
+                    </td>
+                    <td className="px-3 py-3 text-xs text-slate-500">
+                      {h.analyzedAt ? new Date(h.analyzedAt).toLocaleDateString('ko-KR') : '-'}
+                    </td>
+                    <td className="px-3 py-3">
+                      <span className="text-blue-500 text-xs">상세 →</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {/* 페이지네이션 */}
+          {pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-slate-100">
+              <span className="text-xs text-slate-500">
+                {(pagination.page - 1) * 50 + 1}-{Math.min(pagination.page * 50, pagination.total)} / {pagination.total}
+              </span>
+              <div className="flex gap-1">
+                {Array.from({ length: pagination.totalPages }, (_, i) => (
+                  <button
+                    key={i}
+                    onClick={() => loadHospitals(i + 1)}
+                    className={`px-3 py-1 text-xs rounded-lg ${pagination.page === i + 1 ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                  >
+                    {i + 1}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  // ━━ Detail 뷰 ━━
+  const renderDetail = () => {
+    if (!detail) return <div className="text-center py-12 text-slate-400">로딩 중...</div>;
+
+    const mandatoryItems = detail.mandatoryItems || {};
+    const mandatoryChecks = [
+      { key: 'hospital_name', label: '병원명' },
+      { key: 'address', label: '주소' },
+      { key: 'phone', label: '전화번호' },
+      { key: 'department', label: '진료과목' },
+      { key: 'doctor_info', label: '의사 정보' },
+      { key: 'price_disclosure', label: '비급여 가격 공개' },
+    ];
+
+    return (
+      <div className="space-y-6">
+        {/* 상단 네비 */}
+        <div className="flex items-center gap-3">
+          <button onClick={() => setView('hospitals')} className="text-sm text-blue-600 hover:text-blue-800 font-medium">
+            ← 목록
+          </button>
+          <span className="text-slate-300">|</span>
+          <span className="text-sm text-slate-600 font-medium truncate">{detail.hospitalName}</span>
+        </div>
+
+        {/* 헤더 카드 */}
+        <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+          <div className="flex items-start gap-6">
+            <GradeBadge grade={detail.grade} size="lg" />
+            <div className="flex-1">
+              <h2 className="text-xl font-bold text-slate-800">{detail.hospitalName}</h2>
+              <a href={detail.url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-500 hover:underline">{detail.url}</a>
+              <div className="flex items-center gap-6 mt-3">
+                <div>
+                  <span className="text-sm text-slate-500">cleanScore</span>
+                  <span className={`ml-2 text-2xl font-bold ${detail.cleanScore >= 80 ? 'text-emerald-600' : detail.cleanScore >= 50 ? 'text-yellow-600' : 'text-red-600'}`}>
+                    {detail.cleanScore}
+                  </span>
+                  <span className="text-sm text-slate-400">/100</span>
+                </div>
+                <div className="h-8 w-px bg-slate-200" />
+                <div>
+                  <span className="text-sm text-slate-500">위반</span>
+                  <span className="ml-2 text-2xl font-bold text-red-600">{detail.violationCount}</span>
+                  <span className="text-xs text-slate-400 ml-1">
+                    ({detail.criticalCount}C / {detail.majorCount}M / {detail.minorCount}m)
+                  </span>
+                </div>
+                <div className="h-8 w-px bg-slate-200" />
+                <div>
+                  <span className="text-sm text-slate-500">Gray Zone</span>
+                  <span className="ml-2 text-lg font-bold text-yellow-600">{detail.grayZoneCount}</span>
+                </div>
+              </div>
+            </div>
+            <div className="text-right text-xs text-slate-400 space-y-1">
+              <div>크롤: <span className={detail.crawlMethod === 'firecrawl' ? 'text-purple-600' : 'text-slate-600'}>{detail.crawlMethod}</span></div>
+              <div>텍스트: {(detail.textLength || 0).toLocaleString()}자</div>
+              <div>소요: {((detail.totalTimeMs || 0) / 1000).toFixed(1)}초</div>
+              <div>{detail.analyzedAt ? new Date(detail.analyzedAt).toLocaleString('ko-KR') : '-'}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* 위반 목록 (2/3) */}
+          <div className="lg:col-span-2 space-y-4">
+            <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+              <h3 className="text-lg font-bold text-slate-800 mb-4">위반 목록 ({(detail.violations || []).length}건)</h3>
+              {(detail.violations || []).length === 0 ? (
+                <div className="text-center py-8 text-slate-400">위반 없음</div>
+              ) : (
+                <div className="space-y-3">
+                  {(detail.violations || []).map((v, i) => {
+                    const sev = SEVERITY_STYLES[v.adjustedSeverity || v.severity] || SEVERITY_STYLES.minor;
+                    return (
+                      <div key={i} className="border border-slate-100 rounded-xl p-4 hover:border-slate-200 transition-colors">
+                        <div className="flex items-start gap-3">
+                          <span className={`px-2 py-0.5 rounded text-xs font-bold ${sev.bg} ${sev.text} shrink-0`}>{sev.label}</span>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="text-xs font-mono text-slate-400">{v.patternId}</span>
+                              <span className="text-xs text-slate-300">|</span>
+                              <span className="text-xs text-slate-500">{v.category}</span>
+                              {v.source === 'rule_engine_supplement' && (
+                                <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded">규칙엔진 추가</span>
+                              )}
+                              {v.confidence && (
+                                <span className="text-xs text-slate-400">conf:{(v.confidence * 100).toFixed(0)}%</span>
+                              )}
+                            </div>
+                            {v.originalText && (
+                              <p className="text-sm text-red-700 bg-red-50 rounded-lg px-3 py-2 font-mono break-all">
+                                "{v.originalText}"
+                              </p>
+                            )}
+                            {v.reasoning && (
+                              <p className="text-xs text-slate-500 mt-1">{v.reasoning}</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Gray Zones */}
+            {(detail.grayZones || []).length > 0 && (
+              <div className="bg-white rounded-2xl p-6 border border-yellow-200 shadow-sm">
+                <h3 className="text-lg font-bold text-yellow-700 mb-4">Gray Zone ({detail.grayZones.length}건)</h3>
+                <div className="space-y-3">
+                  {detail.grayZones.map((gz, i) => (
+                    <div key={i} className="bg-yellow-50 rounded-xl p-4 border border-yellow-100">
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-mono text-yellow-600">{gz.patternId || '-'}</span>
+                        <span className="text-xs text-yellow-500">{gz.reason || gz.description || ''}</span>
+                      </div>
+                      {gz.originalText && <p className="text-sm text-yellow-800 font-mono">"{gz.originalText}"</p>}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Audit Issues */}
+            {(detail.auditIssues || []).length > 0 && (
+              <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+                <h3 className="text-lg font-bold text-slate-800 mb-4">Audit 보정 내역 ({detail.auditIssues.length}건)</h3>
+                <div className="space-y-2">
+                  {detail.auditIssues.map((issue, i) => (
+                    <div key={i} className="flex items-center gap-3 px-3 py-2 rounded-lg bg-slate-50 text-xs">
+                      <span className={`px-2 py-0.5 rounded font-medium ${
+                        issue.action === 'REMOVE' ? 'bg-green-100 text-green-700' :
+                        issue.action === 'DOWNGRADE' ? 'bg-blue-100 text-blue-700' :
+                        issue.action === 'ADD' ? 'bg-red-100 text-red-700' :
+                        'bg-slate-100 text-slate-600'
+                      }`}>{issue.action}</span>
+                      <span className="text-slate-500">{issue.type}</span>
+                      <span className="text-slate-700 flex-1 truncate">{issue.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* 사이드바 (1/3) */}
+          <div className="space-y-4">
+            {/* 필수 기재사항 */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-800 mb-3">필수 기재사항</h3>
+              <div className="space-y-2">
+                {mandatoryChecks.map(({ key, label }) => {
+                  const item = mandatoryItems[key];
+                  const found = item?.found;
+                  return (
+                    <div key={key} className="flex items-center gap-2">
+                      <span className={`w-5 h-5 rounded-full flex items-center justify-center text-xs ${found ? 'bg-emerald-100 text-emerald-600' : 'bg-red-100 text-red-600'}`}>
+                        {found ? '✓' : '✗'}
+                      </span>
+                      <span className="text-sm text-slate-700">{label}</span>
+                      {item?.value && <span className="text-xs text-slate-400 truncate max-w-[120px]">{item.value}</span>}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 위반 심각도 분포 */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-800 mb-3">심각도 분포</h3>
+              <div className="space-y-3">
+                {[
+                  { key: 'critical', count: detail.criticalCount, color: '#ef4444', label: '심각 (Critical)' },
+                  { key: 'major', count: detail.majorCount, color: '#f97316', label: '중요 (Major)' },
+                  { key: 'minor', count: detail.minorCount, color: '#eab308', label: '경미 (Minor)' },
+                ].map(({ key, count, color, label }) => (
+                  <div key={key}>
+                    <div className="flex justify-between text-xs mb-1">
+                      <span className="text-slate-600">{label}</span>
+                      <span className="font-bold" style={{ color }}>{count || 0}</span>
+                    </div>
+                    <div className="bg-slate-100 rounded-full h-2 overflow-hidden">
+                      <div className="h-full rounded-full" style={{
+                        backgroundColor: color,
+                        width: `${detail.violationCount > 0 ? ((count || 0) / detail.violationCount) * 100 : 0}%`
+                      }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 분석 메타 */}
+            <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm">
+              <h3 className="text-sm font-bold text-slate-800 mb-3">분석 정보</h3>
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">크롤 방법</span>
+                  <span className="text-slate-700 font-medium">{detail.crawlMethod}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">텍스트 길이</span>
+                  <span className="text-slate-700">{(detail.textLength || 0).toLocaleString()}자</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Fetch 시간</span>
+                  <span className="text-slate-700">{((detail.fetchTimeMs || 0) / 1000).toFixed(1)}s</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">Gemini 시간</span>
+                  <span className="text-slate-700">{((detail.geminiTimeMs || 0) / 1000).toFixed(1)}s</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">총 소요</span>
+                  <span className="text-slate-700 font-bold">{((detail.totalTimeMs || 0) / 1000).toFixed(1)}s</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // ━━ 메인 렌더링 ━━
+  return (
+    <div>
+      {/* 탭 네비게이션 */}
+      {view !== 'detail' && (
+        <div className="flex items-center gap-1 mb-6 bg-white rounded-xl p-1 border border-slate-200 shadow-sm w-fit">
+          <button
+            onClick={() => setView('overview')}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${view === 'overview' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+          >
+            전체 현황
+          </button>
+          <button
+            onClick={() => setView('hospitals')}
+            className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${view === 'hospitals' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+          >
+            병원 목록
+          </button>
+        </div>
+      )}
+
+      {view === 'overview' && renderOverview()}
+      {view === 'hospitals' && renderHospitals()}
+      {view === 'detail' && renderDetail()}
     </div>
   );
 }

@@ -166,4 +166,113 @@ reportRoutes.get('/preview-by-url', async (c) => {
   }
 });
 
+/**
+ * GET /v1/report/combined-preview/:hospitalId
+ * 수비수 3종 통합 맛보기 리포트
+ */
+reportRoutes.get('/combined-preview/:hospitalId', async (c) => {
+  const hospitalId = c.req.param('hospitalId');
+
+  try {
+    // Ad MedCheck
+    const adResult = await c.env.DB.prepare(`
+      SELECT grade, violation_count, critical_count, major_count, minor_count, hospital_name
+      FROM hospital_analysis_results
+      WHERE hospital_id = ? AND status = 'success'
+      ORDER BY analyzed_at DESC LIMIT 1
+    `).bind(hospitalId).first();
+
+    // AG MedCheck
+    const aeoResult = await c.env.DB.prepare(`
+      SELECT total_score, content_score, technical_score, trust_score, local_score, ai_friendly_score
+      FROM aeo_scores
+      WHERE hospital_id = ?
+      ORDER BY analyzed_at DESC LIMIT 1
+    `).bind(hospitalId).first();
+
+    // Viral MedCheck
+    const viralResult = await c.env.DB.prepare(`
+      SELECT total_score, blog_count, estimated_ad_spend, sns_channels
+      FROM viral_scores
+      WHERE hospital_id = ?
+      ORDER BY analyzed_at DESC LIMIT 1
+    `).bind(hospitalId).first();
+
+    // 최소 하나라도 있어야 함
+    if (!adResult && !aeoResult && !viralResult) {
+      return c.json({
+        success: false,
+        error: { code: 'NOT_FOUND', message: '분석 결과가 없습니다.' },
+      }, 404);
+    }
+
+    // AEO 카테고리 중 최고/최저 찾기
+    let topCategory = '';
+    let weakestCategory = '';
+    if (aeoResult) {
+      const cats = [
+        { name: '콘텐츠 품질', score: Number(aeoResult.content_score) / 30 },
+        { name: '기술 기반', score: Number(aeoResult.technical_score) / 20 },
+        { name: '신뢰도', score: Number(aeoResult.trust_score) / 20 },
+        { name: '지역 최적화', score: Number(aeoResult.local_score) / 15 },
+        { name: 'AI 친화성', score: Number(aeoResult.ai_friendly_score) / 15 },
+      ].sort((a, b) => b.score - a.score);
+      topCategory = cats[0].name;
+      weakestCategory = cats[cats.length - 1].name;
+    }
+
+    // SNS 채널 수
+    let snsCount = 0;
+    if (viralResult?.sns_channels) {
+      try {
+        const channels = JSON.parse(viralResult.sns_channels as string);
+        snsCount = channels.filter((ch: { detected: boolean }) => ch.detected).length;
+      } catch {}
+    }
+
+    return c.json({
+      success: true,
+      data: {
+        hospitalName: (adResult?.hospital_name as string) || null,
+        hospitalId,
+        preview: true,
+
+        adMedCheck: adResult ? {
+          grade: adResult.grade,
+          totalViolations: adResult.violation_count,
+          severity: {
+            critical: Number(adResult.critical_count) || 0,
+            high: Number(adResult.major_count) || 0,
+            medium: Number(adResult.minor_count) || 0,
+            low: 0,
+          },
+        } : null,
+
+        agMedCheck: aeoResult ? {
+          totalScore: aeoResult.total_score,
+          maxScore: 100,
+          topCategory,
+          weakestCategory,
+        } : null,
+
+        viralMedCheck: viralResult ? {
+          blogCount: viralResult.blog_count,
+          estimatedAdSpend: viralResult.estimated_ad_spend,
+          snsChannels: snsCount,
+        } : null,
+
+        detailsLocked: true,
+        ctaMessage: '상세 분석과 개선 가이드는 무료 회원가입 후 확인하세요.',
+        ctaUrl: '/signup',
+      },
+    });
+  } catch (error) {
+    const err = error as Error;
+    return c.json({
+      success: false,
+      error: { code: 'DB_ERROR', message: err.message },
+    }, 500);
+  }
+});
+
 export { reportRoutes };

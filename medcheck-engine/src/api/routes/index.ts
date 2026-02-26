@@ -33,3 +33,5 @@ export { crawlerRoutes } from './crawler';
 export { reportRoutes } from './report';
 export { aeoRoutes } from './aeo';
 export { viralRoutes } from './viral';
+export { authRoutes } from './auth';
+export { coldmailGenRoutes } from './coldmail-gen';

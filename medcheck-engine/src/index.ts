@@ -45,6 +45,8 @@ import {
   reportRoutes,
   aeoRoutes,
   viralRoutes,
+  authRoutes,
+  coldmailGenRoutes,
 } from './api/routes';
 import type { AppBindings, Env } from './types/env';
 
@@ -480,6 +482,8 @@ app.route('/api/crawler', crawlerRoutes);
 app.route('/v1/report', reportRoutes);
 app.route('/v1/aeo', aeoRoutes);
 app.route('/v1/viral', viralRoutes);
+app.route('/v1/auth', authRoutes);
+app.route('/v1/coldmail', coldmailGenRoutes);
 
 // 병원별 스크린샷
 app.get('/v1/hospitals/:hospitalId/screenshots', async (c) => {

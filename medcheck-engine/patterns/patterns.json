@@ -4,38 +4,166 @@
   "lastUpdated": "2026-01-29",
   "totalPatterns": 156,
   "categories": [
-    {"id": "01", "name": "치료효과보장", "description": "치료 효과를 보장하는 표현"},
-    {"id": "02", "name": "부작용부정", "description": "부작용이 없다고 단정하는 표현"},
-    {"id": "03", "name": "최상급표현", "description": "최고, 최초 등 최상급 표현"},
-    {"id": "04", "name": "비교광고", "description": "다른 의료기관 비교/비방"},
-    {"id": "05", "name": "환자유인", "description": "경품, 할인 등으로 환자 유인"},
-    {"id": "06", "name": "전후사진", "description": "전후 사진 관련 위반"},
-    {"id": "07", "name": "신의료기술", "description": "미인정 신의료기술 광고"},
-    {"id": "08", "name": "의료인자격", "description": "의료인 자격/경력 과장"},
-    {"id": "09", "name": "비급여", "description": "비급여 관련 고지 위반"},
-    {"id": "10", "name": "체험기", "description": "허위/조작 체험기"},
-    {"id": "11", "name": "인증과장", "description": "허위/과장 인증 표시"},
-    {"id": "12", "name": "공포유발", "description": "공포심 유발 표현"},
-    {"id": "13", "name": "의약품광고", "description": "의약품 관련 위반"},
-    {"id": "14", "name": "의료기기광고", "description": "의료기기 관련 위반"},
-    {"id": "15", "name": "암시적표현", "description": "암시적으로 효과 보장"},
-    {"id": "16", "name": "연예인광고", "description": "연예인 활용 광고"},
-    {"id": "17", "name": "SNS광고", "description": "SNS 광고 관련 위반"},
-    {"id": "18", "name": "진료과목", "description": "진료과목 표방 위반"},
-    {"id": "19", "name": "꼼수패턴", "description": "심의 회피 꼼수"},
-    {"id": "20", "name": "허위과장", "description": "허위/과장 표현"},
-    {"id": "21", "name": "성형외과특화", "description": "성형외과 특화 위반"},
-    {"id": "22", "name": "피부과특화", "description": "피부과 특화 위반"},
-    {"id": "23", "name": "치과특화", "description": "치과 특화 위반"},
-    {"id": "24", "name": "한의원특화", "description": "한의원 특화 위반"},
-    {"id": "25", "name": "정신건강의학과특화", "description": "정신건강의학과 특화 위반"},
-    {"id": "26", "name": "비뇨기과특화", "description": "비뇨기과 특화 위반"},
-    {"id": "27", "name": "산부인과특화", "description": "산부인과 특화 위반"},
-    {"id": "28", "name": "안과특화", "description": "안과 특화 위반"},
-    {"id": "29", "name": "척추관절특화", "description": "척추/관절 특화 위반"},
-    {"id": "30", "name": "다이어트특화", "description": "다이어트 특화 위반"},
-    {"id": "31", "name": "탈모특화", "description": "탈모 특화 위반"},
-    {"id": "32", "name": "금지어", "description": "사용 금지 표현"}
+    {
+      "id": "01",
+      "name": "치료효과보장",
+      "description": "치료 효과를 보장하는 표현"
+    },
+    {
+      "id": "02",
+      "name": "부작용부정",
+      "description": "부작용이 없다고 단정하는 표현"
+    },
+    {
+      "id": "03",
+      "name": "최상급표현",
+      "description": "최고, 최초 등 최상급 표현"
+    },
+    {
+      "id": "04",
+      "name": "비교광고",
+      "description": "다른 의료기관 비교/비방"
+    },
+    {
+      "id": "05",
+      "name": "환자유인",
+      "description": "경품, 할인 등으로 환자 유인"
+    },
+    {
+      "id": "06",
+      "name": "전후사진",
+      "description": "전후 사진 관련 위반"
+    },
+    {
+      "id": "07",
+      "name": "신의료기술",
+      "description": "미인정 신의료기술 광고"
+    },
+    {
+      "id": "08",
+      "name": "의료인자격",
+      "description": "의료인 자격/경력 과장"
+    },
+    {
+      "id": "09",
+      "name": "비급여",
+      "description": "비급여 관련 고지 위반"
+    },
+    {
+      "id": "10",
+      "name": "체험기",
+      "description": "허위/조작 체험기"
+    },
+    {
+      "id": "11",
+      "name": "인증과장",
+      "description": "허위/과장 인증 표시"
+    },
+    {
+      "id": "12",
+      "name": "공포유발",
+      "description": "공포심 유발 표현"
+    },
+    {
+      "id": "13",
+      "name": "의약품광고",
+      "description": "의약품 관련 위반"
+    },
+    {
+      "id": "14",
+      "name": "의료기기광고",
+      "description": "의료기기 관련 위반"
+    },
+    {
+      "id": "15",
+      "name": "암시적표현",
+      "description": "암시적으로 효과 보장"
+    },
+    {
+      "id": "16",
+      "name": "연예인광고",
+      "description": "연예인 활용 광고"
+    },
+    {
+      "id": "17",
+      "name": "SNS광고",
+      "description": "SNS 광고 관련 위반"
+    },
+    {
+      "id": "18",
+      "name": "진료과목",
+      "description": "진료과목 표방 위반"
+    },
+    {
+      "id": "19",
+      "name": "꼼수패턴",
+      "description": "심의 회피 꼼수"
+    },
+    {
+      "id": "20",
+      "name": "허위과장",
+      "description": "허위/과장 표현"
+    },
+    {
+      "id": "21",
+      "name": "성형외과특화",
+      "description": "성형외과 특화 위반"
+    },
+    {
+      "id": "22",
+      "name": "피부과특화",
+      "description": "피부과 특화 위반"
+    },
+    {
+      "id": "23",
+      "name": "치과특화",
+      "description": "치과 특화 위반"
+    },
+    {
+      "id": "24",
+      "name": "한의원특화",
+      "description": "한의원 특화 위반"
+    },
+    {
+      "id": "25",
+      "name": "정신건강의학과특화",
+      "description": "정신건강의학과 특화 위반"
+    },
+    {
+      "id": "26",
+      "name": "비뇨기과특화",
+      "description": "비뇨기과 특화 위반"
+    },
+    {
+      "id": "27",
+      "name": "산부인과특화",
+      "description": "산부인과 특화 위반"
+    },
+    {
+      "id": "28",
+      "name": "안과특화",
+      "description": "안과 특화 위반"
+    },
+    {
+      "id": "29",
+      "name": "척추관절특화",
+      "description": "척추/관절 특화 위반"
+    },
+    {
+      "id": "30",
+      "name": "다이어트특화",
+      "description": "다이어트 특화 위반"
+    },
+    {
+      "id": "31",
+      "name": "탈모특화",
+      "description": "탈모 특화 위반"
+    },
+    {
+      "id": "32",
+      "name": "금지어",
+      "description": "사용 금지 표현"
+    }
   ],
   "patterns": [
     {
@@ -44,13 +172,22 @@
       "subcategory": "100% 완치 표현",
       "pattern": "100%\\s*(완치|치료|성공|개선|효과)",
       "patternType": "regex",
-      "keywords": ["100%", "완치", "치료", "성공"],
+      "keywords": [
+        "100%",
+        "완치",
+        "치료",
+        "성공"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "치료 효과를 100% 보장하는 표현",
       "example": "100% 완치 보장",
       "suggestion": "'개인에 따라 효과가 다를 수 있습니다' 문구 추가",
-      "exceptions": ["100% 소독", "100% 예약제", "100% 국산"]
+      "exceptions": [
+        "100% 소독",
+        "100% 예약제",
+        "100% 국산"
+      ]
     },
     {
       "id": "P-56-01-002",
@@ -58,7 +195,12 @@
       "subcategory": "확실한 효과 표현",
       "pattern": "(확실히|반드시|무조건|틀림없이)\\s*(치료|완치|효과|개선)",
       "patternType": "regex",
-      "keywords": ["확실히", "반드시", "무조건", "틀림없이"],
+      "keywords": [
+        "확실히",
+        "반드시",
+        "무조건",
+        "틀림없이"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "치료 효과를 확정적으로 보장하는 표현",
@@ -72,7 +214,10 @@
       "subcategory": "완벽한 결과 표현",
       "pattern": "(완벽한|완전한)\\s*(치료|효과|결과|개선)",
       "patternType": "regex",
-      "keywords": ["완벽한", "완전한"],
+      "keywords": [
+        "완벽한",
+        "완전한"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "완벽한 치료 결과를 보장하는 표현",
@@ -86,7 +231,11 @@
       "subcategory": "영구적 효과 표현",
       "pattern": "(영구적|영원히|평생)\\s*(효과|유지|지속)",
       "patternType": "regex",
-      "keywords": ["영구적", "영원히", "평생"],
+      "keywords": [
+        "영구적",
+        "영원히",
+        "평생"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "영구적인 치료 효과를 보장하는 표현",
@@ -100,7 +249,10 @@
       "subcategory": "재발 없음 표현",
       "pattern": "(재발|재수술)\\s*(없|안|절대|0%)",
       "patternType": "regex",
-      "keywords": ["재발 없음", "재수술 없음"],
+      "keywords": [
+        "재발 없음",
+        "재수술 없음"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "재발이나 재수술이 없다고 보장하는 표현",
@@ -114,7 +266,11 @@
       "subcategory": "즉각적 효과 표현",
       "pattern": "(즉각적|즉시|바로|당장)\\s*(효과|개선|치료)",
       "patternType": "regex",
-      "keywords": ["즉각적", "즉시", "바로"],
+      "keywords": [
+        "즉각적",
+        "즉시",
+        "바로"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "즉각적인 치료 효과를 보장하는 표현",
@@ -128,7 +284,11 @@
       "subcategory": "단기간 완치 표현",
       "pattern": "(단\\s*\\d+일|\\d+회만에|한번에)\\s*(완치|치료|해결)",
       "patternType": "regex",
-      "keywords": ["단기간", "한번에", "회만에"],
+      "keywords": [
+        "단기간",
+        "한번에",
+        "회만에"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "단기간 내 완치를 보장하는 표현",
@@ -140,9 +300,12 @@
       "id": "P-56-02-001",
       "category": "부작용부정",
       "subcategory": "부작용 없음",
-      "pattern": "부작용\\s*(없|안|제로|0%|전혀)",
+      "pattern": "(?:부작용\\s*(?:없|안|제로|0%|전혀)|부작용\\s*.{0,5}(?:전혀|절대)\\s*없|부작용.{0,10}걱정\\s*(?:없|안))",
       "patternType": "regex",
-      "keywords": ["부작용 없음", "부작용 제로"],
+      "keywords": [
+        "부작용 없음",
+        "부작용 제로"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "부작용이 없다고 단정하는 표현",
@@ -156,13 +319,18 @@
       "subcategory": "통증 없음",
       "pattern": "(통증|아픔|고통)\\s*(없|안|제로|전혀)",
       "patternType": "regex",
-      "keywords": ["무통", "통증 없음"],
+      "keywords": [
+        "무통",
+        "통증 없음"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "통증이 없다고 단정하는 표현",
       "example": "무통 시술",
       "suggestion": "'통증을 최소화한 시술' 등으로 변경",
-      "exceptions": ["무통분만"]
+      "exceptions": [
+        "무통분만"
+      ]
     },
     {
       "id": "P-56-02-003",
@@ -170,7 +338,10 @@
       "subcategory": "흉터 없음",
       "pattern": "(흉터|상처)\\s*(없|안|제로|전혀)",
       "patternType": "regex",
-      "keywords": ["흉터 없음", "무흉터"],
+      "keywords": [
+        "흉터 없음",
+        "무흉터"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "흉터가 없다고 단정하는 표현",
@@ -184,7 +355,10 @@
       "subcategory": "안전성 과장",
       "pattern": "(100%|완전|완벽)\\s*(안전|안심)",
       "patternType": "regex",
-      "keywords": ["100% 안전", "완전 안전"],
+      "keywords": [
+        "100% 안전",
+        "완전 안전"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "완전한 안전성을 보장하는 표현",
@@ -198,7 +372,10 @@
       "subcategory": "부기 없음",
       "pattern": "(부기|붓기|멍)\\s*(없|안|제로|전혀)",
       "patternType": "regex",
-      "keywords": ["부기 없음", "붓기 없음"],
+      "keywords": [
+        "부기 없음",
+        "붓기 없음"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "부기나 멍이 없다고 단정하는 표현",
@@ -212,7 +389,10 @@
       "subcategory": "회복기간 없음",
       "pattern": "(회복\\s*기간|다운타임)\\s*(없|제로|0)",
       "patternType": "regex",
-      "keywords": ["회복기간 없음", "다운타임 제로"],
+      "keywords": [
+        "회복기간 없음",
+        "다운타임 제로"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "회복 기간이 없다고 단정하는 표현",
@@ -226,7 +406,10 @@
       "subcategory": "합병증 없음",
       "pattern": "(합병증|후유증)\\s*(없|안|제로|전혀)",
       "patternType": "regex",
-      "keywords": ["합병증 없음", "후유증 없음"],
+      "keywords": [
+        "합병증 없음",
+        "후유증 없음"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "합병증이 없다고 단정하는 표현",
@@ -240,7 +423,13 @@
       "subcategory": "최고 표현",
       "pattern": "(최고|최상|최강|넘버원|No\\.?\\s*1)",
       "patternType": "regex",
-      "keywords": ["최고", "최상", "최강", "넘버원", "No.1"],
+      "keywords": [
+        "최고",
+        "최상",
+        "최강",
+        "넘버원",
+        "No.1"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "객관적 근거 없이 최상급 표현 사용",
@@ -254,7 +443,11 @@
       "subcategory": "최초/유일 표현",
       "pattern": "(최초|유일|독보적|세계\\s*최초|국내\\s*최초)",
       "patternType": "regex",
-      "keywords": ["최초", "유일", "독보적"],
+      "keywords": [
+        "최초",
+        "유일",
+        "독보적"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "객관적 근거 없이 최초/유일 표현 사용",
@@ -268,7 +461,11 @@
       "subcategory": "최다 표현",
       "pattern": "(최다|가장\\s*많은|압도적)",
       "patternType": "regex",
-      "keywords": ["최다", "가장 많은", "압도적"],
+      "keywords": [
+        "최다",
+        "가장 많은",
+        "압도적"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "객관적 근거 없이 최다 표현 사용",
@@ -282,7 +479,11 @@
       "subcategory": "최저가 표현",
       "pattern": "(최저가|가장\\s*저렴|파격|특가)",
       "patternType": "regex",
-      "keywords": ["최저가", "가장 저렴", "파격가"],
+      "keywords": [
+        "최저가",
+        "가장 저렴",
+        "파격가"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "객관적 근거 없이 최저가 표현 사용",
@@ -296,7 +497,11 @@
       "subcategory": "최신 기술 과장",
       "pattern": "(최첨단|최신|혁신적|획기적)\\s*(기술|장비|시스템)",
       "patternType": "regex",
-      "keywords": ["최첨단", "최신", "혁신적"],
+      "keywords": [
+        "최첨단",
+        "최신",
+        "혁신적"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "기술이나 장비의 우수성을 과장",
@@ -310,7 +515,11 @@
       "subcategory": "1등/1위 표현",
       "pattern": "(1등|1위|일등|일위|TOP\\s*1)",
       "patternType": "regex",
-      "keywords": ["1등", "1위", "TOP1"],
+      "keywords": [
+        "1등",
+        "1위",
+        "TOP1"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "객관적 근거 없이 1위 표현 사용",
@@ -324,7 +533,10 @@
       "subcategory": "타병원 비하",
       "pattern": "(다른\\s*병원|타\\s*병원|일반\\s*병원).*(보다|대비|비해).*((나은|좋은|우수|뛰어난)|(못한|부족|열등))",
       "patternType": "regex",
-      "keywords": ["다른 병원", "타 병원"],
+      "keywords": [
+        "다른 병원",
+        "타 병원"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제4호",
       "description": "다른 의료기관을 비방하거나 비교하는 표현",
@@ -338,7 +550,10 @@
       "subcategory": "의료인 비교",
       "pattern": "(다른\\s*의사|타\\s*원장|일반\\s*의사).*(보다|대비|비해)",
       "patternType": "regex",
-      "keywords": ["다른 의사", "타 원장"],
+      "keywords": [
+        "다른 의사",
+        "타 원장"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제4호",
       "description": "다른 의료인을 비방하거나 비교하는 표현",
@@ -352,7 +567,11 @@
       "subcategory": "암시적 비교",
       "pattern": "(진정한|진짜|제대로\\s*된|확실한)\\s*(전문|실력|치료)",
       "patternType": "regex",
-      "keywords": ["진정한", "진짜", "제대로 된"],
+      "keywords": [
+        "진정한",
+        "진짜",
+        "제대로 된"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제4호",
       "description": "다른 의료기관이 가짜라는 암시적 비교",
@@ -366,7 +585,10 @@
       "subcategory": "가격 비교",
       "pattern": "(타\\s*병원|다른\\s*곳).*(가격|비용|비싸)",
       "patternType": "regex",
-      "keywords": ["타 병원 가격", "다른 곳 비용"],
+      "keywords": [
+        "타 병원 가격",
+        "다른 곳 비용"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제4호",
       "description": "다른 의료기관과 가격 비교",
@@ -380,13 +602,20 @@
       "subcategory": "경품 제공",
       "pattern": "(경품|사은품|선물|증정|무료\\s*제공)",
       "patternType": "regex",
-      "keywords": ["경품", "사은품", "선물", "증정"],
+      "keywords": [
+        "경품",
+        "사은품",
+        "선물",
+        "증정"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제27조 제3항",
       "description": "환자 유인을 위한 경품 제공 광고",
       "example": "시술 시 사은품 증정",
       "suggestion": "경품 관련 표현 삭제",
-      "exceptions": ["의료 목적 필수품"]
+      "exceptions": [
+        "의료 목적 필수품"
+      ]
     },
     {
       "id": "P-56-05-002",
@@ -394,7 +623,12 @@
       "subcategory": "할인 과장",
       "pattern": "(\\d{2,3}%\\s*할인|반값|무료\\s*시술|0원)",
       "patternType": "regex",
-      "keywords": ["할인", "반값", "무료", "0원"],
+      "keywords": [
+        "할인",
+        "반값",
+        "무료",
+        "0원"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제27조 제3항",
       "description": "과도한 할인으로 환자 유인",
@@ -408,7 +642,9 @@
       "subcategory": "무료 상담 미끼",
       "pattern": "(무료\\s*상담|공짜\\s*상담).*시술",
       "patternType": "regex",
-      "keywords": ["무료 상담"],
+      "keywords": [
+        "무료 상담"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제27조 제3항",
       "description": "무료 상담으로 유인 후 시술 권유",
@@ -422,7 +658,11 @@
       "subcategory": "긴급성 조장",
       "pattern": "(선착순|한정|마감\\s*임박|오늘만|지금\\s*바로)",
       "patternType": "regex",
-      "keywords": ["선착순", "한정", "마감 임박"],
+      "keywords": [
+        "선착순",
+        "한정",
+        "마감 임박"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항",
       "description": "긴급성을 조장하여 환자 유인",
@@ -436,7 +676,11 @@
       "subcategory": "포인트/적립금",
       "pattern": "(포인트|적립금|마일리지)\\s*(적립|제공|지급)",
       "patternType": "regex",
-      "keywords": ["포인트", "적립금", "마일리지"],
+      "keywords": [
+        "포인트",
+        "적립금",
+        "마일리지"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제27조 제3항",
       "description": "포인트나 적립금 제공으로 환자 유인",
@@ -450,7 +694,10 @@
       "subcategory": "소개비 지급",
       "pattern": "(소개비|추천\\s*보상|리워드)\\s*(지급|제공)",
       "patternType": "regex",
-      "keywords": ["소개비", "추천 보상"],
+      "keywords": [
+        "소개비",
+        "추천 보상"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제27조 제3항",
       "description": "환자 소개에 대한 보상 제공",
@@ -464,7 +711,10 @@
       "subcategory": "동의 없는 사진",
       "pattern": "전후\\s*사진|before.*after|비포.*애프터",
       "patternType": "regex",
-      "keywords": ["전후 사진", "before after"],
+      "keywords": [
+        "전후 사진",
+        "before after"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제9호",
       "description": "환자 동의 없는 전후 사진 사용",
@@ -478,7 +728,10 @@
       "subcategory": "사진 조작",
       "pattern": "(보정|편집|수정).*사진",
       "patternType": "regex",
-      "keywords": ["보정", "편집"],
+      "keywords": [
+        "보정",
+        "편집"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제9호",
       "description": "전후 사진을 조작하거나 보정한 경우",
@@ -492,7 +745,10 @@
       "subcategory": "타인 사진 사용",
       "pattern": "(모델|연예인|타인).*사진",
       "patternType": "regex",
-      "keywords": ["모델 사진", "연예인"],
+      "keywords": [
+        "모델 사진",
+        "연예인"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제9호",
       "description": "실제 환자가 아닌 타인의 사진 사용",
@@ -506,7 +762,10 @@
       "subcategory": "조명/각도 조작",
       "pattern": "(조명|각도|필터).*(다른|변경|조작)",
       "patternType": "regex",
-      "keywords": ["조명 조작", "각도 변경"],
+      "keywords": [
+        "조명 조작",
+        "각도 변경"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제9호",
       "description": "전후 사진의 조명이나 각도를 다르게 촬영",
@@ -518,15 +777,24 @@
       "id": "P-56-07-001",
       "category": "신의료기술",
       "subcategory": "미인정 시술",
-      "pattern": "(줄기세포|세포\\s*치료|유전자\\s*치료)(?!.*신의료기술)",
+      "pattern": "(줄기세포|세포\\s*치료|유전자\\s*치료)\\s*.{0,15}(?:효과|치료|시술|회춘|재생|젊)",
       "patternType": "regex",
-      "keywords": ["줄기세포", "세포 치료", "유전자 치료"],
+      "keywords": [
+        "줄기세포",
+        "세포 치료",
+        "유전자 치료"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제6호",
       "description": "신의료기술로 인정되지 않은 시술 광고",
       "example": "줄기세포 시술로 회춘",
       "suggestion": "신의료기술 인정 여부 확인 필수",
-      "exceptions": ["신의료기술 인정", "임상시험"]
+      "exceptions": [
+        "신의료기술 인정",
+        "임상시험",
+        "연구",
+        "논문"
+      ]
     },
     {
       "id": "P-56-07-002",
@@ -534,7 +802,10 @@
       "subcategory": "허가 전 광고",
       "pattern": "(임상\\s*시험|연구\\s*중|개발\\s*중).*효과",
       "patternType": "regex",
-      "keywords": ["임상 시험", "연구 중"],
+      "keywords": [
+        "임상 시험",
+        "연구 중"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제6호",
       "description": "허가되지 않은 시술의 효과 광고",
@@ -548,7 +819,11 @@
       "subcategory": "면역세포 치료",
       "pattern": "(면역\\s*세포|NK\\s*세포|T\\s*세포)\\s*(치료|요법)",
       "patternType": "regex",
-      "keywords": ["면역세포", "NK세포", "T세포"],
+      "keywords": [
+        "면역세포",
+        "NK세포",
+        "T세포"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제6호",
       "description": "미인정 면역세포 치료 광고",
@@ -562,7 +837,11 @@
       "subcategory": "PRP/성장인자",
       "pattern": "(PRP|성장\\s*인자|자가\\s*혈).*(주사|치료|요법)",
       "patternType": "regex",
-      "keywords": ["PRP", "성장인자", "자가혈"],
+      "keywords": [
+        "PRP",
+        "성장인자",
+        "자가혈"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제6호",
       "description": "PRP 등 효과 과장 광고",
@@ -574,15 +853,22 @@
       "id": "P-56-08-001",
       "category": "의료인자격",
       "subcategory": "전문의 사칭",
-      "pattern": "(전문의|전문\\s*의사)(?!.*자격)",
+      "pattern": "(?:비전문의|전문의\\s*아닌|전문의\\s*없이|무자격).{0,20}(?:전문의|진료|시술)",
       "patternType": "regex",
-      "keywords": ["전문의"],
+      "keywords": [
+        "비전문의",
+        "무자격"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제77조",
-      "description": "전문의 자격 없이 전문의 표기",
+      "description": "전문의 자격 없이 전문의로 행세하거나 비전문의 시술 표현",
       "example": "피부과 전문의",
       "suggestion": "실제 전문의 자격 확인 필수",
-      "exceptions": []
+      "exceptions": [
+        "전문의 자격",
+        "전문의 소개",
+        "전문의 상담"
+      ]
     },
     {
       "id": "P-56-08-002",
@@ -590,7 +876,10 @@
       "subcategory": "학력 과장",
       "pattern": "(명문|일류|최고)\\s*(대학|의대)",
       "patternType": "regex",
-      "keywords": ["명문 대학", "일류 의대"],
+      "keywords": [
+        "명문 대학",
+        "일류 의대"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "의료인 학력을 과장하는 표현",
@@ -604,7 +893,10 @@
       "subcategory": "경력 과장",
       "pattern": "(수십\\s*년|오랜|풍부한)\\s*경험",
       "patternType": "regex",
-      "keywords": ["수십 년 경험", "오랜 경험"],
+      "keywords": [
+        "수십 년 경험",
+        "오랜 경험"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "의료인 경력을 모호하게 과장",
@@ -618,7 +910,10 @@
       "subcategory": "해외 자격 과장",
       "pattern": "(미국|해외|외국)\\s*(자격|면허|인증)",
       "patternType": "regex",
-      "keywords": ["미국 자격", "해외 면허"],
+      "keywords": [
+        "미국 자격",
+        "해외 면허"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "해외 자격을 과장하는 표현",
@@ -632,7 +927,10 @@
       "subcategory": "수술 건수 과장",
       "pattern": "(\\d+만|수만|수천)\\s*(건|케이스|회)\\s*수술",
       "patternType": "regex",
-      "keywords": ["수만 건", "수천 건"],
+      "keywords": [
+        "수만 건",
+        "수천 건"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "검증 불가한 수술 건수 과장",
@@ -646,7 +944,11 @@
       "subcategory": "비급여 미고지",
       "pattern": "(가격|비용|요금).*원(?!.*비급여)",
       "patternType": "regex",
-      "keywords": ["가격", "비용", "원"],
+      "keywords": [
+        "가격",
+        "비용",
+        "원"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제45조",
       "description": "비급여 항목임을 고지하지 않은 경우",
@@ -660,7 +962,10 @@
       "subcategory": "추가비용 미고지",
       "pattern": "(부터|~|이상)\\s*\\d+.*원",
       "patternType": "regex",
-      "keywords": ["부터", "이상"],
+      "keywords": [
+        "부터",
+        "이상"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제45조",
       "description": "최저가만 표시하고 추가 비용 미고지",
@@ -674,7 +979,10 @@
       "subcategory": "VAT 미포함",
       "pattern": "(VAT|부가세)\\s*(별도|미포함|제외)",
       "patternType": "regex",
-      "keywords": ["VAT 별도", "부가세 미포함"],
+      "keywords": [
+        "VAT 별도",
+        "부가세 미포함"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제45조",
       "description": "VAT 별도 표시로 실제 가격 숨김",
@@ -688,7 +996,11 @@
       "subcategory": "가짜 체험기",
       "pattern": "(체험기|후기|리뷰).*(작성|등록|이벤트)",
       "patternType": "regex",
-      "keywords": ["체험기", "후기", "리뷰"],
+      "keywords": [
+        "체험기",
+        "후기",
+        "리뷰"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제5호",
       "description": "허위 또는 조작된 체험기",
@@ -702,7 +1014,10 @@
       "subcategory": "유도된 후기",
       "pattern": "(후기.*할인|리뷰.*혜택|체험기.*사은품)",
       "patternType": "regex",
-      "keywords": ["후기 할인", "리뷰 혜택"],
+      "keywords": [
+        "후기 할인",
+        "리뷰 혜택"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제5호",
       "description": "대가를 제공하고 받은 후기",
@@ -716,7 +1031,10 @@
       "subcategory": "직원/가족 후기",
       "pattern": "(직원|가족|지인)\\s*(후기|체험)",
       "patternType": "regex",
-      "keywords": ["직원 후기", "가족 체험"],
+      "keywords": [
+        "직원 후기",
+        "가족 체험"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제5호",
       "description": "이해관계자의 후기를 일반 후기로 게시",
@@ -730,7 +1048,11 @@
       "subcategory": "허위 인증",
       "pattern": "(인증|승인|허가)(?!.*(식약처|복지부|의협))",
       "patternType": "regex",
-      "keywords": ["인증", "승인", "허가"],
+      "keywords": [
+        "인증",
+        "승인",
+        "허가"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "허위 또는 과장된 인증 표시",
@@ -744,7 +1066,11 @@
       "subcategory": "시상 과장",
       "pattern": "(수상|시상|대상)(?!.*(년도|기관))",
       "patternType": "regex",
-      "keywords": ["수상", "시상", "대상"],
+      "keywords": [
+        "수상",
+        "시상",
+        "대상"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "수상 내역을 모호하게 과장",
@@ -758,7 +1084,11 @@
       "subcategory": "ISO 과장",
       "pattern": "(ISO|JCI|국제\\s*인증).*획득",
       "patternType": "regex",
-      "keywords": ["ISO", "JCI", "국제 인증"],
+      "keywords": [
+        "ISO",
+        "JCI",
+        "국제 인증"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "인증 내용을 과장하거나 오래된 인증 표시",
@@ -772,7 +1102,10 @@
       "subcategory": "질병 공포",
       "pattern": "(방치하면|그대로\\s*두면).*(심각|위험|악화)",
       "patternType": "regex",
-      "keywords": ["방치하면", "그대로 두면"],
+      "keywords": [
+        "방치하면",
+        "그대로 두면"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제7호",
       "description": "질병에 대한 공포심을 과도하게 유발",
@@ -786,7 +1119,11 @@
       "subcategory": "긴급성 과장",
       "pattern": "(지금\\s*당장|즉시|빨리).*(치료|상담|내원)",
       "patternType": "regex",
-      "keywords": ["지금 당장", "즉시", "빨리"],
+      "keywords": [
+        "지금 당장",
+        "즉시",
+        "빨리"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제7호",
       "description": "치료의 긴급성을 과도하게 강조",
@@ -800,7 +1137,11 @@
       "subcategory": "후회 유도",
       "pattern": "(후회|늦으면|놓치면).*(평생|돌이킬\\s*수\\s*없)",
       "patternType": "regex",
-      "keywords": ["후회", "늦으면", "놓치면"],
+      "keywords": [
+        "후회",
+        "늦으면",
+        "놓치면"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제7호",
       "description": "치료하지 않으면 후회한다는 표현",
@@ -814,7 +1155,10 @@
       "subcategory": "전문의약품",
       "pattern": "(처방전|전문\\s*의약품|ETC)",
       "patternType": "regex",
-      "keywords": ["처방전", "전문 의약품"],
+      "keywords": [
+        "처방전",
+        "전문 의약품"
+      ],
       "severity": "critical",
       "legalBasis": "약사법 제68조",
       "description": "전문의약품 광고 금지",
@@ -828,7 +1172,11 @@
       "subcategory": "의약품 효능 과장",
       "pattern": "(특효약|만병통치|기적의\\s*약)",
       "patternType": "regex",
-      "keywords": ["특효약", "만병통치", "기적의 약"],
+      "keywords": [
+        "특효약",
+        "만병통치",
+        "기적의 약"
+      ],
       "severity": "critical",
       "legalBasis": "약사법 제68조",
       "description": "의약품 효능을 과장하는 표현",
@@ -842,7 +1190,11 @@
       "subcategory": "오프라벨 사용",
       "pattern": "(허가\\s*외|off-?label|적응증\\s*외)",
       "patternType": "regex",
-      "keywords": ["허가 외", "off-label", "적응증 외"],
+      "keywords": [
+        "허가 외",
+        "off-label",
+        "적응증 외"
+      ],
       "severity": "critical",
       "legalBasis": "약사법 제68조",
       "description": "허가된 적응증 외 사용 광고",
@@ -856,7 +1208,10 @@
       "subcategory": "미허가 의료기기",
       "pattern": "(해외\\s*직구|수입|비인가).*장비",
       "patternType": "regex",
-      "keywords": ["해외 직구", "미인가"],
+      "keywords": [
+        "해외 직구",
+        "미인가"
+      ],
       "severity": "critical",
       "legalBasis": "의료기기법 제24조",
       "description": "국내 미허가 의료기기 광고",
@@ -870,7 +1225,10 @@
       "subcategory": "장비 효능 과장",
       "pattern": "(마법|기적|놀라운).*장비",
       "patternType": "regex",
-      "keywords": ["마법의 장비", "기적의 장비"],
+      "keywords": [
+        "마법의 장비",
+        "기적의 장비"
+      ],
       "severity": "major",
       "legalBasis": "의료기기법 제24조",
       "description": "의료기기 효능을 과장하는 표현",
@@ -884,7 +1242,10 @@
       "subcategory": "장비 독점 주장",
       "pattern": "(국내\\s*유일|단독\\s*보유|독점\\s*도입).*장비",
       "patternType": "regex",
-      "keywords": ["국내 유일", "단독 보유"],
+      "keywords": [
+        "국내 유일",
+        "단독 보유"
+      ],
       "severity": "major",
       "legalBasis": "의료기기법 제24조",
       "description": "장비 독점 보유 주장",
@@ -898,7 +1259,10 @@
       "subcategory": "많은 분들",
       "pattern": "(많은\\s*분|대부분|거의\\s*모든).*효과",
       "patternType": "regex",
-      "keywords": ["많은 분들", "대부분"],
+      "keywords": [
+        "많은 분들",
+        "대부분"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "암시적으로 효과를 보장하는 표현",
@@ -912,7 +1276,10 @@
       "subcategory": "선택 유도",
       "pattern": "(현명한|똑똑한|제대로\\s*된)\\s*선택",
       "patternType": "regex",
-      "keywords": ["현명한 선택", "똑똑한 선택"],
+      "keywords": [
+        "현명한 선택",
+        "똑똑한 선택"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항",
       "description": "우리를 선택하지 않으면 현명하지 않다는 암시",
@@ -926,7 +1293,10 @@
       "subcategory": "추천 강조",
       "pattern": "(강력\\s*추천|적극\\s*추천|꼭\\s*추천)",
       "patternType": "regex",
-      "keywords": ["강력 추천", "적극 추천"],
+      "keywords": [
+        "강력 추천",
+        "적극 추천"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항",
       "description": "주관적인 추천 표현 과용",
@@ -940,7 +1310,10 @@
       "subcategory": "만족도 암시",
       "pattern": "(높은|압도적|놀라운)\\s*만족도",
       "patternType": "regex",
-      "keywords": ["높은 만족도", "압도적 만족도"],
+      "keywords": [
+        "높은 만족도",
+        "압도적 만족도"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항",
       "description": "구체적 근거 없이 만족도 암시",
@@ -954,7 +1327,11 @@
       "subcategory": "연예인 치료 암시",
       "pattern": "(연예인|셀럽|스타|유명인).*시술",
       "patternType": "regex",
-      "keywords": ["연예인", "셀럽", "스타"],
+      "keywords": [
+        "연예인",
+        "셀럽",
+        "스타"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제5호",
       "description": "연예인 시술 사실 암시로 환자 유인",
@@ -968,7 +1345,11 @@
       "subcategory": "유명인 추천",
       "pattern": "(누구|셀럽).*(추천|선택|애용)",
       "patternType": "regex",
-      "keywords": ["추천", "선택", "애용"],
+      "keywords": [
+        "추천",
+        "선택",
+        "애용"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제5호",
       "description": "유명인이 추천한다고 허위 표시",
@@ -982,7 +1363,10 @@
       "subcategory": "연예인 사진 사용",
       "pattern": "(연예인|스타|셀럽).*사진",
       "patternType": "regex",
-      "keywords": ["연예인 사진", "스타 사진"],
+      "keywords": [
+        "연예인 사진",
+        "스타 사진"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제5호",
       "description": "연예인 사진을 광고에 사용",
@@ -994,15 +1378,22 @@
       "id": "P-56-17-001",
       "category": "SNS광고",
       "subcategory": "광고 미표시",
-      "pattern": "(협찬|광고|제휴)",
+      "pattern": "(?:협찬|광고|제휴)\\s*(?:아닙|아닌|없|미표시|표시\\s*안)",
       "patternType": "regex",
-      "keywords": ["협찬", "광고", "제휴"],
+      "keywords": [
+        "협찬",
+        "광고",
+        "제휴"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조, 표시광고법",
-      "description": "광고임을 명확히 표시하지 않음",
+      "description": "광고/협찬임에도 이를 숨기거나 부인하는 표현",
       "example": "협찬 없이 솔직 후기",
       "suggestion": "'광고' 또는 '협찬' 명확히 표시",
-      "exceptions": []
+      "exceptions": [
+        "광고 문의",
+        "광고 표시"
+      ]
     },
     {
       "id": "P-56-17-002",
@@ -1010,7 +1401,11 @@
       "subcategory": "인플루언서 광고",
       "pattern": "(인플루언서|유튜버|블로거).*추천",
       "patternType": "regex",
-      "keywords": ["인플루언서", "유튜버", "블로거"],
+      "keywords": [
+        "인플루언서",
+        "유튜버",
+        "블로거"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조, 표시광고법",
       "description": "인플루언서를 활용한 의료광고",
@@ -1024,7 +1419,11 @@
       "subcategory": "해시태그 광고",
       "pattern": "#(추천|맛집|핫플|인기)",
       "patternType": "regex",
-      "keywords": ["#추천", "#맛집", "#핫플"],
+      "keywords": [
+        "#추천",
+        "#맛집",
+        "#핫플"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조, 표시광고법",
       "description": "의료광고에 부적절한 해시태그 사용",
@@ -1036,15 +1435,21 @@
       "id": "P-56-18-001",
       "category": "진료과목",
       "subcategory": "표방 불가 진료과목",
-      "pattern": "(성형외과|피부과)(?!.*전문의)",
+      "pattern": "(?:무면허|비인가|미인가).{0,15}(?:성형외과|피부과|진료과목)",
       "patternType": "regex",
-      "keywords": ["성형외과", "피부과"],
+      "keywords": [
+        "성형외과",
+        "피부과"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제43조",
-      "description": "전문의 자격 없이 진료과목 표방",
+      "description": "인가되지 않은 진료과목 표방",
       "example": "성형외과 진료",
       "suggestion": "전문의 자격 확인 후 표기",
-      "exceptions": []
+      "exceptions": [
+        "성형외과 전문의",
+        "피부과 전문의"
+      ]
     },
     {
       "id": "P-56-18-002",
@@ -1052,7 +1457,10 @@
       "subcategory": "유사 진료과목",
       "pattern": "(미용\\s*외과|안티에이징\\s*센터|리프팅\\s*센터)",
       "patternType": "regex",
-      "keywords": ["미용 외과", "안티에이징 센터"],
+      "keywords": [
+        "미용 외과",
+        "안티에이징 센터"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제43조",
       "description": "법정 진료과목이 아닌 명칭 사용",
@@ -1066,7 +1474,10 @@
       "subcategory": "복수 진료과목 혼동",
       "pattern": "(종합|통합|올인원)\\s*(진료|클리닉)",
       "patternType": "regex",
-      "keywords": ["종합 진료", "통합 클리닉"],
+      "keywords": [
+        "종합 진료",
+        "통합 클리닉"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제43조",
       "description": "진료과목을 혼동하게 하는 표현",
@@ -1080,7 +1491,10 @@
       "subcategory": "로그인 장벽",
       "pattern": "(로그인|회원\\s*가입).*(사진|후기|결과)",
       "patternType": "regex",
-      "keywords": ["로그인", "회원가입"],
+      "keywords": [
+        "로그인",
+        "회원가입"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조",
       "description": "전후 사진 등을 로그인 뒤에 숨김",
@@ -1094,7 +1508,10 @@
       "subcategory": "Before만 로그인",
       "pattern": "(before|전).*(로그인|비공개)",
       "patternType": "regex",
-      "keywords": ["before 로그인", "전 비공개"],
+      "keywords": [
+        "before 로그인",
+        "전 비공개"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조",
       "description": "Before 사진만 로그인 뒤에 숨겨 심의 회피",
@@ -1108,7 +1525,11 @@
       "subcategory": "시간제한 게시",
       "pattern": "(24시간|일정\\s*시간|한시적).*게시",
       "patternType": "regex",
-      "keywords": ["24시간", "일정 시간", "한시적"],
+      "keywords": [
+        "24시간",
+        "일정 시간",
+        "한시적"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조",
       "description": "심의를 피하기 위해 시간 제한 게시",
@@ -1122,7 +1543,10 @@
       "subcategory": "DM 유도",
       "pattern": "(DM|다이렉트\\s*메시지|개인\\s*문의).*(상담|가격|정보)",
       "patternType": "regex",
-      "keywords": ["DM", "다이렉트 메시지"],
+      "keywords": [
+        "DM",
+        "다이렉트 메시지"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조",
       "description": "공개 광고를 피해 DM으로 유도",
@@ -1136,7 +1560,10 @@
       "subcategory": "스토리 광고",
       "pattern": "(스토리|24시간\\s*후\\s*삭제)",
       "patternType": "regex",
-      "keywords": ["스토리", "24시간 후 삭제"],
+      "keywords": [
+        "스토리",
+        "24시간 후 삭제"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조",
       "description": "임시 게시물로 심의 회피",
@@ -1148,15 +1575,22 @@
       "id": "P-56-20-001",
       "category": "허위과장",
       "subcategory": "가짜 통계",
-      "pattern": "(\\d+%.*만족|\\d+명.*선택)(?!.*출처)",
+      "pattern": "(\\d{2,3}%\\s*만족|\\d+명\\s*(?:이상\\s*)?선택)(?!.*출처)",
       "patternType": "regex",
-      "keywords": ["만족도", "선택"],
+      "keywords": [
+        "만족도",
+        "선택"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제1호",
       "description": "출처 없는 통계 사용",
       "example": "99% 만족도",
       "suggestion": "통계 출처와 조사 기관 명시",
-      "exceptions": []
+      "exceptions": [
+        "출처:",
+        "조사기관",
+        "설문조사"
+      ]
     },
     {
       "id": "P-56-20-002",
@@ -1164,7 +1598,10 @@
       "subcategory": "가짜 수상",
       "pattern": "(소비자\\s*대상|브랜드\\s*대상|올해의)(?!.*(주최|기관))",
       "patternType": "regex",
-      "keywords": ["소비자 대상", "브랜드 대상"],
+      "keywords": [
+        "소비자 대상",
+        "브랜드 대상"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제1호",
       "description": "허위 또는 불명확한 수상 내역",
@@ -1178,7 +1615,12 @@
       "subcategory": "허위 건수",
       "pattern": "(누적|총)\\s*\\d+(건|명|회).*시술",
       "patternType": "regex",
-      "keywords": ["누적", "총", "건", "명"],
+      "keywords": [
+        "누적",
+        "총",
+        "건",
+        "명"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제1호",
       "description": "검증 불가한 시술 건수 주장",
@@ -1192,7 +1634,10 @@
       "subcategory": "허위 협력",
       "pattern": "(유명\\s*병원|대학\\s*병원).*(협력|제휴|파트너)",
       "patternType": "regex",
-      "keywords": ["유명 병원 협력", "대학 병원 제휴"],
+      "keywords": [
+        "유명 병원 협력",
+        "대학 병원 제휴"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제1호",
       "description": "허위 협력/제휴 관계 주장",
@@ -1206,7 +1651,10 @@
       "subcategory": "자연스러운 보장",
       "pattern": "(자연스러운|자연스럽게)\\s*(결과|마무리|라인)",
       "patternType": "regex",
-      "keywords": ["자연스러운", "자연스럽게"],
+      "keywords": [
+        "자연스러운",
+        "자연스럽게"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "자연스러운 결과를 보장하는 표현",
@@ -1220,7 +1668,10 @@
       "subcategory": "연예인 닮은꼴",
       "pattern": "(연예인|스타).*닮은",
       "patternType": "regex",
-      "keywords": ["연예인 닮은", "스타 닮은"],
+      "keywords": [
+        "연예인 닮은",
+        "스타 닮은"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항",
       "description": "연예인 닮은 외모를 만들어준다는 광고",
@@ -1232,15 +1683,22 @@
       "id": "P-56-21-003",
       "category": "성형외과특화",
       "subcategory": "동안 보장",
-      "pattern": "(동안|10년\\s*젊게|나이\\s*거꾸로)",
+      "pattern": "(?:동안\\s*(?:효과|시술|만들|되|얻)|10년\\s*젊|나이\\s*거꾸로|세월\\s*거꾸로)",
       "patternType": "regex",
-      "keywords": ["동안", "10년 젊게"],
+      "keywords": [
+        "동안",
+        "10년 젊게"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "동안 효과를 보장하는 표현",
       "example": "10년은 젊어지는 시술",
       "suggestion": "구체적인 시술 효과 설명으로 변경",
-      "exceptions": []
+      "exceptions": [
+        "동안에",
+        "하는 동안",
+        "기간 동안"
+      ]
     },
     {
       "id": "P-56-21-004",
@@ -1248,7 +1706,10 @@
       "subcategory": "황금비율",
       "pattern": "(황금\\s*비율|완벽한\\s*비율|이상적\\s*비율)",
       "patternType": "regex",
-      "keywords": ["황금 비율", "완벽한 비율"],
+      "keywords": [
+        "황금 비율",
+        "완벽한 비율"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "이상적 비율 완성을 보장하는 표현",
@@ -1262,7 +1723,10 @@
       "subcategory": "부작용 최소 과장",
       "pattern": "(붓기|멍|통증)\\s*(최소|거의\\s*없)",
       "patternType": "regex",
-      "keywords": ["붓기 최소", "멍 거의 없음"],
+      "keywords": [
+        "붓기 최소",
+        "멍 거의 없음"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "성형 부작용 최소화 과장",
@@ -1276,7 +1740,10 @@
       "subcategory": "피부 재생 보장",
       "pattern": "(피부\\s*재생|세포\\s*재생|콜라겐\\s*재생)\\s*(보장|확실|100%)",
       "patternType": "regex",
-      "keywords": ["피부 재생", "세포 재생"],
+      "keywords": [
+        "피부 재생",
+        "세포 재생"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "피부 재생 효과를 보장하는 표현",
@@ -1290,7 +1757,10 @@
       "subcategory": "여드름 완치",
       "pattern": "(여드름|트러블)\\s*(완치|완전\\s*제거|100%)",
       "patternType": "regex",
-      "keywords": ["여드름 완치", "트러블 완치"],
+      "keywords": [
+        "여드름 완치",
+        "트러블 완치"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "여드름 완치를 보장하는 표현",
@@ -1304,7 +1774,10 @@
       "subcategory": "화이트닝 보장",
       "pattern": "(미백|화이트닝)\\s*(보장|확실|100%)",
       "patternType": "regex",
-      "keywords": ["미백 보장", "화이트닝"],
+      "keywords": [
+        "미백 보장",
+        "화이트닝"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "미백 효과를 보장하는 표현",
@@ -1318,7 +1791,10 @@
       "subcategory": "주름 제거 보장",
       "pattern": "(주름|잔주름)\\s*(완전\\s*제거|100%|싹)",
       "patternType": "regex",
-      "keywords": ["주름 제거", "잔주름 싹"],
+      "keywords": [
+        "주름 제거",
+        "잔주름 싹"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "주름 완전 제거를 보장하는 표현",
@@ -1332,7 +1808,10 @@
       "subcategory": "모공 축소 보장",
       "pattern": "(모공|각질)\\s*(완전|100%|확실)\\s*(축소|제거)",
       "patternType": "regex",
-      "keywords": ["모공 축소", "각질 제거"],
+      "keywords": [
+        "모공 축소",
+        "각질 제거"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "모공 축소 효과를 보장하는 표현",
@@ -1346,7 +1825,10 @@
       "subcategory": "평생 보장",
       "pattern": "(임플란트|보철).*평생\\s*(보장|보증|AS)",
       "patternType": "regex",
-      "keywords": ["평생 보장", "평생 보증"],
+      "keywords": [
+        "평생 보장",
+        "평생 보증"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "임플란트 등의 평생 보장 광고",
@@ -1360,7 +1842,10 @@
       "subcategory": "당일 완성",
       "pattern": "(당일|즉시|하루만에)\\s*(완성|시술|치료)",
       "patternType": "regex",
-      "keywords": ["당일 완성", "즉시 시술"],
+      "keywords": [
+        "당일 완성",
+        "즉시 시술"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "당일 치료 완료를 강조하는 표현",
@@ -1374,7 +1859,10 @@
       "subcategory": "무절개 과장",
       "pattern": "(무절개|절개\\s*없|비절개)\\s*(임플란트|수술)",
       "patternType": "regex",
-      "keywords": ["무절개", "비절개"],
+      "keywords": [
+        "무절개",
+        "비절개"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "무절개 시술을 과장하는 표현",
@@ -1388,7 +1876,10 @@
       "subcategory": "치아 색상 보장",
       "pattern": "(새하얀|눈부신|연예인\\s*치아)\\s*(완성|보장)",
       "patternType": "regex",
-      "keywords": ["새하얀 치아", "눈부신 치아"],
+      "keywords": [
+        "새하얀 치아",
+        "눈부신 치아"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "치아 미백 결과를 과장하는 표현",
@@ -1402,7 +1893,10 @@
       "subcategory": "한방 효능 과장",
       "pattern": "(만병통치|불로장생|신비한\\s*효능)",
       "patternType": "regex",
-      "keywords": ["만병통치", "불로장생"],
+      "keywords": [
+        "만병통치",
+        "불로장생"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "한방 치료의 효능을 과장",
@@ -1416,7 +1910,11 @@
       "subcategory": "비방 강조",
       "pattern": "(비방|비법|가전비방|조상\\s*대대)",
       "patternType": "regex",
-      "keywords": ["비방", "비법", "가전비방"],
+      "keywords": [
+        "비방",
+        "비법",
+        "가전비방"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "검증 불가한 비방 강조",
@@ -1430,7 +1928,10 @@
       "subcategory": "체질 만능",
       "pattern": "(체질\\s*개선|체질\\s*치료).*(만능|모든|완전)",
       "patternType": "regex",
-      "keywords": ["체질 개선", "체질 치료"],
+      "keywords": [
+        "체질 개선",
+        "체질 치료"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "체질 개선의 효과를 과장",
@@ -1444,7 +1945,10 @@
       "subcategory": "한약 부작용 부정",
       "pattern": "(한약|한방).*(부작용\\s*없|안전|자연)",
       "patternType": "regex",
-      "keywords": ["한약 부작용 없음", "자연 치료"],
+      "keywords": [
+        "한약 부작용 없음",
+        "자연 치료"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "한약의 부작용이 없다고 단정",
@@ -1458,7 +1962,10 @@
       "subcategory": "완치 보장",
       "pattern": "(우울증|불안|공황)\\s*(완치|완전\\s*치료)",
       "patternType": "regex",
-      "keywords": ["우울증 완치", "불안 완치"],
+      "keywords": [
+        "우울증 완치",
+        "불안 완치"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "정신과 질환 완치를 보장",
@@ -1472,7 +1979,10 @@
       "subcategory": "비밀 보장 과장",
       "pattern": "(100%\\s*비밀|완전\\s*비밀|절대\\s*비밀)",
       "patternType": "regex",
-      "keywords": ["100% 비밀", "완전 비밀"],
+      "keywords": [
+        "100% 비밀",
+        "완전 비밀"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항",
       "description": "비밀 보장을 과도하게 강조",
@@ -1486,7 +1996,10 @@
       "subcategory": "약물 의존 부정",
       "pattern": "(약물\\s*의존|중독)\\s*(없|안|걱정\\s*없)",
       "patternType": "regex",
-      "keywords": ["약물 의존 없음", "중독 걱정 없음"],
+      "keywords": [
+        "약물 의존 없음",
+        "중독 걱정 없음"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "약물 의존성이 없다고 단정",
@@ -1500,7 +2013,11 @@
       "subcategory": "남성기능 과장",
       "pattern": "(남성\\s*기능|발기력|정력)\\s*(강화|증강|회복\\s*보장)",
       "patternType": "regex",
-      "keywords": ["남성 기능", "발기력", "정력"],
+      "keywords": [
+        "남성 기능",
+        "발기력",
+        "정력"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "남성 기능 개선을 과장하는 표현",
@@ -1514,7 +2031,10 @@
       "subcategory": "사이즈 과장",
       "pattern": "(사이즈|크기)\\s*(확대|증대|업그레이드)",
       "patternType": "regex",
-      "keywords": ["사이즈 확대", "크기 증대"],
+      "keywords": [
+        "사이즈 확대",
+        "크기 증대"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "신체 부위 사이즈 확대를 과장",
@@ -1528,7 +2048,10 @@
       "subcategory": "조루 완치",
       "pattern": "(조루|지루)\\s*(완치|100%|확실)",
       "patternType": "regex",
-      "keywords": ["조루 완치", "지루 완치"],
+      "keywords": [
+        "조루 완치",
+        "지루 완치"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "조루/지루 완치를 보장하는 표현",
@@ -1542,7 +2065,10 @@
       "subcategory": "임신 보장",
       "pattern": "(임신\\s*성공|임신\\s*보장|100%\\s*임신)",
       "patternType": "regex",
-      "keywords": ["임신 성공", "임신 보장"],
+      "keywords": [
+        "임신 성공",
+        "임신 보장"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "임신 성공을 보장하는 표현",
@@ -1556,7 +2082,10 @@
       "subcategory": "질 성형 과장",
       "pattern": "(질\\s*성형|이쁜이\\s*수술)\\s*(완벽|자연스러운\\s*보장)",
       "patternType": "regex",
-      "keywords": ["질 성형", "이쁜이 수술"],
+      "keywords": [
+        "질 성형",
+        "이쁜이 수술"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "여성 성형 시술 결과 과장",
@@ -1570,7 +2099,10 @@
       "subcategory": "난임 치료 과장",
       "pattern": "(난임|불임)\\s*(100%|확실|완치)",
       "patternType": "regex",
-      "keywords": ["난임 치료", "불임 완치"],
+      "keywords": [
+        "난임 치료",
+        "불임 완치"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "난임 치료 효과를 과장하는 표현",
@@ -1584,7 +2116,10 @@
       "subcategory": "시력 회복 보장",
       "pattern": "(시력\\s*회복|시력\\s*교정)\\s*(100%|완벽|보장)",
       "patternType": "regex",
-      "keywords": ["시력 회복", "시력 교정"],
+      "keywords": [
+        "시력 회복",
+        "시력 교정"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "시력 회복을 보장하는 표현",
@@ -1598,7 +2133,10 @@
       "subcategory": "라식 안전성 과장",
       "pattern": "(라식|라섹)\\s*(100%\\s*안전|부작용\\s*없)",
       "patternType": "regex",
-      "keywords": ["라식 안전", "라섹 안전"],
+      "keywords": [
+        "라식 안전",
+        "라섹 안전"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "시력 교정술 안전성 과장",
@@ -1612,7 +2150,10 @@
       "subcategory": "노안 완치",
       "pattern": "(노안|백내장)\\s*(완치|완전\\s*해결|100%)",
       "patternType": "regex",
-      "keywords": ["노안 완치", "백내장 완치"],
+      "keywords": [
+        "노안 완치",
+        "백내장 완치"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "노안/백내장 완치를 보장하는 표현",
@@ -1626,7 +2167,10 @@
       "subcategory": "비수술 과장",
       "pattern": "(비수술|무수술)\\s*(완치|100%|확실)",
       "patternType": "regex",
-      "keywords": ["비수술 완치", "무수술"],
+      "keywords": [
+        "비수술 완치",
+        "무수술"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "비수술 치료 효과를 과장",
@@ -1640,7 +2184,10 @@
       "subcategory": "통증 제거 보장",
       "pattern": "(통증|디스크)\\s*(완전\\s*제거|100%\\s*해결)",
       "patternType": "regex",
-      "keywords": ["통증 제거", "디스크 해결"],
+      "keywords": [
+        "통증 제거",
+        "디스크 해결"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "통증 완전 제거를 보장",
@@ -1654,7 +2201,10 @@
       "subcategory": "허리 디스크 완치",
       "pattern": "(허리|목)\\s*디스크\\s*(완치|완전|100%)",
       "patternType": "regex",
-      "keywords": ["허리 디스크 완치", "목 디스크 완치"],
+      "keywords": [
+        "허리 디스크 완치",
+        "목 디스크 완치"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "디스크 완치를 보장하는 표현",
@@ -1668,7 +2218,10 @@
       "subcategory": "관절염 완치",
       "pattern": "(관절염|류마티스)\\s*(완치|완전\\s*치료)",
       "patternType": "regex",
-      "keywords": ["관절염 완치", "류마티스 완치"],
+      "keywords": [
+        "관절염 완치",
+        "류마티스 완치"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "관절염 완치를 보장하는 표현",
@@ -1682,7 +2235,10 @@
       "subcategory": "감량 보장",
       "pattern": "(\\d+kg\\s*감량|확실한\\s*다이어트|100%\\s*감량)",
       "patternType": "regex",
-      "keywords": ["kg 감량", "확실한 다이어트"],
+      "keywords": [
+        "kg 감량",
+        "확실한 다이어트"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "체중 감량을 보장하는 표현",
@@ -1696,7 +2252,10 @@
       "subcategory": "요요 없음",
       "pattern": "(요요\\s*없|요요\\s*방지\\s*보장|요요\\s*제로)",
       "patternType": "regex",
-      "keywords": ["요요 없음", "요요 방지"],
+      "keywords": [
+        "요요 없음",
+        "요요 방지"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "요요 현상 없음을 보장",
@@ -1710,7 +2269,10 @@
       "subcategory": "지방 제거 보장",
       "pattern": "(지방\\s*제거|셀룰라이트\\s*제거)\\s*(100%|완전|확실)",
       "patternType": "regex",
-      "keywords": ["지방 제거", "셀룰라이트 제거"],
+      "keywords": [
+        "지방 제거",
+        "셀룰라이트 제거"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "지방 완전 제거를 보장하는 표현",
@@ -1724,7 +2286,10 @@
       "subcategory": "식욕 억제 과장",
       "pattern": "(식욕\\s*억제|배고픔\\s*없|공복감\\s*제로)",
       "patternType": "regex",
-      "keywords": ["식욕 억제", "배고픔 없음"],
+      "keywords": [
+        "식욕 억제",
+        "배고픔 없음"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "식욕 억제 효과를 과장하는 표현",
@@ -1738,7 +2303,10 @@
       "subcategory": "발모 보장",
       "pattern": "(발모|모발\\s*재생)\\s*(보장|100%|확실)",
       "patternType": "regex",
-      "keywords": ["발모 보장", "모발 재생"],
+      "keywords": [
+        "발모 보장",
+        "모발 재생"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "발모 효과를 보장하는 표현",
@@ -1752,7 +2320,10 @@
       "subcategory": "탈모 완치",
       "pattern": "(탈모\\s*완치|탈모\\s*100%\\s*치료)",
       "patternType": "regex",
-      "keywords": ["탈모 완치", "탈모 치료"],
+      "keywords": [
+        "탈모 완치",
+        "탈모 치료"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "탈모 완치를 보장하는 표현",
@@ -1766,7 +2337,10 @@
       "subcategory": "모발 이식 생착률",
       "pattern": "(생착률|생존율)\\s*(100%|99%|보장)",
       "patternType": "regex",
-      "keywords": ["생착률 100%", "생착률 보장"],
+      "keywords": [
+        "생착률 100%",
+        "생착률 보장"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "모발 이식 생착률을 과장하는 표현",
@@ -1780,7 +2354,11 @@
       "subcategory": "기적/마법",
       "pattern": "(기적|마법|신비|신통)",
       "patternType": "regex",
-      "keywords": ["기적", "마법", "신비"],
+      "keywords": [
+        "기적",
+        "마법",
+        "신비"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "과학적 근거 없는 기적/마법 표현",
@@ -1794,7 +2372,11 @@
       "subcategory": "특효/명약",
       "pattern": "(특효|명약|묘약|신약)",
       "patternType": "regex",
-      "keywords": ["특효", "명약", "묘약"],
+      "keywords": [
+        "특효",
+        "명약",
+        "묘약"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호, 약사법",
       "description": "특효나 명약 등의 과장 표현",
@@ -1808,7 +2390,11 @@
       "subcategory": "획기적/혁명적",
       "pattern": "(획기적|혁명적|놀라운|경이로운)",
       "patternType": "regex",
-      "keywords": ["획기적", "혁명적", "놀라운"],
+      "keywords": [
+        "획기적",
+        "혁명적",
+        "놀라운"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "과장된 형용사 사용",
@@ -1822,7 +2408,10 @@
       "subcategory": "세계적/국제적",
       "pattern": "(세계적|국제적|글로벌)\\s*(수준|명성|인정)",
       "patternType": "regex",
-      "keywords": ["세계적", "국제적"],
+      "keywords": [
+        "세계적",
+        "국제적"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "검증 불가한 세계적/국제적 표현",
@@ -1836,7 +2425,11 @@
       "subcategory": "독점/유일",
       "pattern": "(독점|유일하게|오직\\s*여기서만)",
       "patternType": "regex",
-      "keywords": ["독점", "유일하게", "오직"],
+      "keywords": [
+        "독점",
+        "유일하게",
+        "오직"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "독점이나 유일성을 주장하는 표현",
@@ -1850,7 +2443,12 @@
       "subcategory": "명의/대가",
       "pattern": "(명의|대가|거장|달인)",
       "patternType": "regex",
-      "keywords": ["명의", "대가", "거장", "달인"],
+      "keywords": [
+        "명의",
+        "대가",
+        "거장",
+        "달인"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "의료인을 과도하게 미화하는 표현",
@@ -1864,7 +2462,11 @@
       "subcategory": "꿈의/환상의",
       "pattern": "(꿈의|환상의|이상적인|궁극의)",
       "patternType": "regex",
-      "keywords": ["꿈의", "환상의", "궁극의"],
+      "keywords": [
+        "꿈의",
+        "환상의",
+        "궁극의"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "비현실적인 수식어 사용",
@@ -1878,7 +2480,11 @@
       "subcategory": "천연/자연 과장",
       "pattern": "(100%\\s*천연|순수\\s*자연|무해한)",
       "patternType": "regex",
-      "keywords": ["100% 천연", "순수 자연", "무해한"],
+      "keywords": [
+        "100% 천연",
+        "순수 자연",
+        "무해한"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "천연/자연을 과장하여 안전성 오인 유발",
@@ -1892,7 +2498,10 @@
       "subcategory": "성장 보장",
       "pattern": "(키\\s*성장|성장\\s*보장|\\d+cm\\s*성장)",
       "patternType": "regex",
-      "keywords": ["키 성장", "성장 보장"],
+      "keywords": [
+        "키 성장",
+        "성장 보장"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "성장 효과를 보장하는 표현",
@@ -1906,7 +2515,10 @@
       "subcategory": "ADHD 완치",
       "pattern": "(ADHD|주의력\\s*결핍)\\s*(완치|완전\\s*치료)",
       "patternType": "regex",
-      "keywords": ["ADHD 완치", "주의력 결핍 치료"],
+      "keywords": [
+        "ADHD 완치",
+        "주의력 결핍 치료"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "ADHD 완치를 보장하는 표현",
@@ -1920,7 +2532,10 @@
       "subcategory": "알레르기 완치",
       "pattern": "(알레르기|아토피)\\s*(완치|100%|완전)",
       "patternType": "regex",
-      "keywords": ["알레르기 완치", "아토피 완치"],
+      "keywords": [
+        "알레르기 완치",
+        "아토피 완치"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "알레르기 완치를 보장하는 표현",
@@ -1934,7 +2549,10 @@
       "subcategory": "당뇨 완치",
       "pattern": "(당뇨|혈당)\\s*(완치|완전\\s*치료|정상화\\s*보장)",
       "patternType": "regex",
-      "keywords": ["당뇨 완치", "혈당 정상화"],
+      "keywords": [
+        "당뇨 완치",
+        "혈당 정상화"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "당뇨 완치를 보장하는 표현",
@@ -1948,7 +2566,10 @@
       "subcategory": "고혈압 완치",
       "pattern": "(고혈압|혈압)\\s*(완치|완전\\s*치료|정상화\\s*보장)",
       "patternType": "regex",
-      "keywords": ["고혈압 완치", "혈압 정상화"],
+      "keywords": [
+        "고혈압 완치",
+        "혈압 정상화"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "고혈압 완치를 보장하는 표현",
@@ -1962,7 +2583,10 @@
       "subcategory": "암 완치",
       "pattern": "(암|종양)\\s*(완치|100%\\s*치료|완전\\s*제거)",
       "patternType": "regex",
-      "keywords": ["암 완치", "종양 완전 제거"],
+      "keywords": [
+        "암 완치",
+        "종양 완전 제거"
+      ],
       "severity": "critical",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "암 완치를 보장하는 표현",
@@ -1976,7 +2600,10 @@
       "subcategory": "코골이 완치",
       "pattern": "(코골이|수면\\s*무호흡)\\s*(완치|완전\\s*해결|100%)",
       "patternType": "regex",
-      "keywords": ["코골이 완치", "수면 무호흡 해결"],
+      "keywords": [
+        "코골이 완치",
+        "수면 무호흡 해결"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "코골이 완치를 보장하는 표현",
@@ -1990,7 +2617,10 @@
       "subcategory": "비염 완치",
       "pattern": "(비염|축농증)\\s*(완치|완전\\s*치료|100%)",
       "patternType": "regex",
-      "keywords": ["비염 완치", "축농증 완치"],
+      "keywords": [
+        "비염 완치",
+        "축농증 완치"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "비염 완치를 보장하는 표현",
@@ -2004,7 +2634,10 @@
       "subcategory": "만성통증 완치",
       "pattern": "(만성\\s*통증|신경통)\\s*(완치|완전\\s*해결|100%)",
       "patternType": "regex",
-      "keywords": ["만성 통증 완치", "신경통 해결"],
+      "keywords": [
+        "만성 통증 완치",
+        "신경통 해결"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "만성통증 완치를 보장하는 표현",
@@ -2018,7 +2651,10 @@
       "subcategory": "주사 한방 해결",
       "pattern": "(주사\\s*한\\s*방|시술\\s*한\\s*번).*해결",
       "patternType": "regex",
-      "keywords": ["주사 한 방", "시술 한 번"],
+      "keywords": [
+        "주사 한 방",
+        "시술 한 번"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "한 번의 시술로 해결된다는 과장",
@@ -2032,7 +2668,10 @@
       "subcategory": "24시간 전문의",
       "pattern": "(24시간|야간)\\s*(전문의|전담)",
       "patternType": "regex",
-      "keywords": ["24시간 전문의", "야간 전문의"],
+      "keywords": [
+        "24시간 전문의",
+        "야간 전문의"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제1호",
       "description": "24시간 전문의 상주를 허위 광고",
@@ -2046,7 +2685,10 @@
       "subcategory": "완전 회복 보장",
       "pattern": "(완전\\s*회복|100%\\s*재활|원래대로)",
       "patternType": "regex",
-      "keywords": ["완전 회복", "100% 재활"],
+      "keywords": [
+        "완전 회복",
+        "100% 재활"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "완전 회복을 보장하는 표현",
@@ -2060,7 +2702,10 @@
       "subcategory": "빠른 회복 과장",
       "pattern": "(\\d+일\\s*만에|초고속|빠른)\\s*회복",
       "patternType": "regex",
-      "keywords": ["빠른 회복", "초고속 회복"],
+      "keywords": [
+        "빠른 회복",
+        "초고속 회복"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "회복 속도를 과장하는 표현",
@@ -2074,7 +2719,10 @@
       "subcategory": "100% 정확도",
       "pattern": "(100%\\s*정확|완벽한\\s*진단|오진\\s*없)",
       "patternType": "regex",
-      "keywords": ["100% 정확", "완벽한 진단"],
+      "keywords": [
+        "100% 정확",
+        "완벽한 진단"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "진단 정확도를 과장하는 표현",
@@ -2088,7 +2736,10 @@
       "subcategory": "모든 질병 발견",
       "pattern": "(모든\\s*질병|만병|숨은\\s*질환)\\s*(발견|검출|진단)",
       "patternType": "regex",
-      "keywords": ["모든 질병 발견", "숨은 질환 진단"],
+      "keywords": [
+        "모든 질병 발견",
+        "숨은 질환 진단"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "모든 질병 발견을 보장하는 표현",
@@ -2102,7 +2753,10 @@
       "subcategory": "암 조기 발견 보장",
       "pattern": "(암\\s*조기\\s*발견|초기\\s*암)\\s*(보장|100%)",
       "patternType": "regex",
-      "keywords": ["암 조기 발견", "초기 암 발견"],
+      "keywords": [
+        "암 조기 발견",
+        "초기 암 발견"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제3호",
       "description": "암 조기 발견을 보장하는 표현",
@@ -2116,7 +2770,10 @@
       "subcategory": "맞춤 치료 과장",
       "pattern": "(완벽한\\s*맞춤|1:1\\s*맞춤|개인별\\s*완벽)",
       "patternType": "regex",
-      "keywords": ["완벽한 맞춤", "1:1 맞춤"],
+      "keywords": [
+        "완벽한 맞춤",
+        "1:1 맞춤"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "맞춤 치료를 과장하는 표현",
@@ -2130,7 +2787,11 @@
       "subcategory": "VIP 과장",
       "pattern": "(VIP|프리미엄|특별\\s*관리)\\s*(전용|서비스)",
       "patternType": "regex",
-      "keywords": ["VIP", "프리미엄", "특별 관리"],
+      "keywords": [
+        "VIP",
+        "프리미엄",
+        "특별 관리"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "VIP 서비스를 과장하는 표현",
@@ -2144,7 +2805,10 @@
       "subcategory": "의료관광 과장",
       "pattern": "(의료\\s*관광|해외\\s*환자)\\s*(선호|선택|1위)",
       "patternType": "regex",
-      "keywords": ["의료 관광", "해외 환자"],
+      "keywords": [
+        "의료 관광",
+        "해외 환자"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제56조 제2항 제2호",
       "description": "의료관광 실적을 과장하는 표현",
@@ -2158,7 +2822,11 @@
       "subcategory": "덤핑 가격",
       "pattern": "(파격\\s*할인|초특가|땡처리|헐값)",
       "patternType": "regex",
-      "keywords": ["파격 할인", "초특가", "땡처리"],
+      "keywords": [
+        "파격 할인",
+        "초특가",
+        "땡처리"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제27조 제3항",
       "description": "의료 서비스를 덤핑 가격으로 광고",
@@ -2172,7 +2840,10 @@
       "subcategory": "무이자 할부",
       "pattern": "(무이자|\\d+개월\\s*할부)\\s*(지원|제공|가능)",
       "patternType": "regex",
-      "keywords": ["무이자", "할부"],
+      "keywords": [
+        "무이자",
+        "할부"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제27조 제3항",
       "description": "무이자 할부로 환자 유인",
@@ -2186,7 +2857,10 @@
       "subcategory": "보험 적용 오인",
       "pattern": "(보험\\s*적용|건강보험)(?!.*비급여)",
       "patternType": "regex",
-      "keywords": ["보험 적용", "건강보험"],
+      "keywords": [
+        "보험 적용",
+        "건강보험"
+      ],
       "severity": "major",
       "legalBasis": "의료법 제45조",
       "description": "보험 적용 여부를 오인하게 하는 표현",
@@ -2200,7 +2874,10 @@
       "subcategory": "가격 미공개",
       "pattern": "(가격\\s*문의|비용\\s*상담|가격은\\s*문의)",
       "patternType": "regex",
-      "keywords": ["가격 문의", "비용 상담"],
+      "keywords": [
+        "가격 문의",
+        "비용 상담"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제45조",
       "description": "비급여 가격을 공개하지 않음",
@@ -2214,7 +2891,10 @@
       "subcategory": "패키지 가격 오인",
       "pattern": "(패키지|세트|묶음)\\s*(할인|특가|가격)",
       "patternType": "regex",
-      "keywords": ["패키지 할인", "세트 가격"],
+      "keywords": [
+        "패키지 할인",
+        "세트 가격"
+      ],
       "severity": "minor",
       "legalBasis": "의료법 제45조, 제27조",
       "description": "패키지 가격으로 개별 가격 오인 유발",

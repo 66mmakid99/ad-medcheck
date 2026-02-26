@@ -1,12 +1,18 @@
 /**
  * 규칙 엔진
  * 패턴 매칭 결과를 분석하여 위반 판정 및 청정지수/등급 계산
- * 
+ *
  * v2.1 수정사항:
  * - 점수 체계 역전: 100점 = 좋음 (청정지수)
  * - 날씨 이모지 + 직관적 상태 표현
  * - 신뢰도를 점수 계산에 반영
  * - 부드럽고 간결한 안내 문구
+ *
+ * v3.0 수정사항 (Task 1-1):
+ * - 4단계 심각도 (critical/high/medium/low)
+ * - 면책조항 감지 시 심각도 1단계 하향 (절대 위반 제외)
+ * - 영역별 가중치 (event/treatment/faq/review/doctor)
+ * - 카운트 기반 등급 계산
  */
 
 import type { PatternMatch } from './pattern-matcher';
@@ -111,11 +117,19 @@ export interface ScoreResult {
   cleanScore: number;
   /** 감점 합계 */
   totalDeduction: number;
-  /** 심각도별 감점 */
+  /** 심각도별 감점 (4단계) */
   severityDeductions: {
     critical: number;
-    major: number;
-    minor: number;
+    high: number;
+    medium: number;
+    low: number;
+  };
+  /** 심각도별 개수 (4단계) */
+  severityCounts: {
+    critical: number;
+    high: number;
+    medium: number;
+    low: number;
   };
   /** 카테고리별 감점 */
   categoryDeductions: Record<string, number>;
@@ -123,7 +137,9 @@ export interface ScoreResult {
   grade: AnalysisGrade;
   /** 등급 정보 */
   gradeInfo: GradeInfo;
-  
+  /** 영역 타입 */
+  sectionType?: string;
+
   // 이전 버전 호환성
   totalScore: number;
   gradeDescription: string;
@@ -150,10 +166,14 @@ export interface ViolationJudgment {
 // 감점 가중치 설정
 // ============================================
 
-const SEVERITY_DEDUCTIONS = {
+/**
+ * 4단계 심각도별 감점 (출력 심각도 기준)
+ */
+const SEVERITY_DEDUCTIONS: Record<string, number> = {
   critical: 25,
-  major: 12,
-  minor: 5,
+  high: 15,
+  medium: 8,
+  low: 3,
 };
 
 const CATEGORY_WEIGHTS: Record<string, number> = {
@@ -167,6 +187,27 @@ const CATEGORY_WEIGHTS: Record<string, number> = {
   '금지어': 1.0,
 };
 
+/**
+ * 영역별 가중치
+ */
+const SECTION_WEIGHTS: Record<string, number> = {
+  'event': 0.8,       // 이벤트 - 할인 표현 흔함
+  'treatment': 1.2,   // 시술 설명 - 과장 표현 심각
+  'faq': 0.6,         // FAQ - 정보 제공 목적
+  'review': 0.7,      // 후기 - 환자 표현
+  'doctor': 1.0,      // 의사 소개
+  'default': 1.0,     // 기타
+};
+
+/**
+ * 절대 위반 패턴 (면책조항 있어도 심각도 유지)
+ */
+const ABSOLUTE_VIOLATIONS = [
+  'P-56-01-001',  // 100% 완치/성공
+  'P-56-01-002',  // 100% 효과 보장
+  'P-56-02-001',  // 부작용 없음 단정
+];
+
 // ============================================
 // 규칙 엔진 클래스
 // ============================================
@@ -174,10 +215,12 @@ const CATEGORY_WEIGHTS: Record<string, number> = {
 export class RuleEngine {
   /**
    * 패턴 매칭 결과를 위반 판정으로 변환
+   * @param matches 패턴 매칭 결과
+   * @param sectionType 영역 타입 (event/treatment/faq/review/doctor/default)
    */
-  judge(matches: PatternMatch[]): ViolationJudgment {
+  judge(matches: PatternMatch[], sectionType?: string): ViolationJudgment {
     const violations = this.convertToViolations(matches);
-    const score = this.calculateScore(matches);
+    const score = this.calculateScore(violations, sectionType);
     const summary = this.generateSummary(violations, score);
     const recommendations = this.generateRecommendations(violations, score);
 
@@ -191,13 +234,13 @@ export class RuleEngine {
   }
 
   /**
-   * PatternMatch → ViolationResult 변환
+   * PatternMatch → ViolationResult 변환 (4단계 심각도 + 면책조항 하향)
    */
   private convertToViolations(matches: PatternMatch[]): ViolationResult[] {
     return matches.map(match => ({
       type: this.mapCategoryToType(match.category),
       status: this.determineStatus(match.confidence),
-      severity: this.mapSeverity(match.severity),
+      severity: this.mapSeverity(match.severity, match.disclaimerDetected, match.patternId),
       matchedText: match.matchedText,
       position: match.position,
       description: match.description,
@@ -242,12 +285,38 @@ export class RuleEngine {
   }
 
   /**
-   * 심각도 매핑
+   * 심각도 매핑 (3단계 패턴 → 4단계 출력)
+   * 면책조항 감지 시 1단계 하향 (절대 위반 제외)
    */
-  private mapSeverity(severity: string): ViolationSeverity {
-    if (severity === 'critical') return 'high';
-    if (severity === 'major') return 'medium';
-    return 'low';
+  private mapSeverity(
+    severity: string,
+    disclaimerDetected?: boolean,
+    patternId?: string
+  ): ViolationSeverity {
+    // 기본 매핑: critical→critical, major→high, minor→medium
+    let mapped: ViolationSeverity;
+    if (severity === 'critical') mapped = 'critical';
+    else if (severity === 'major') mapped = 'high';
+    else mapped = 'medium';
+
+    // 면책조항 감지 시 1단계 하향 (절대 위반 제외)
+    if (disclaimerDetected && patternId && !ABSOLUTE_VIOLATIONS.includes(patternId)) {
+      mapped = this.downgradeSeverity(mapped);
+    }
+
+    return mapped;
+  }
+
+  /**
+   * 심각도 1단계 하향
+   */
+  private downgradeSeverity(severity: ViolationSeverity): ViolationSeverity {
+    switch (severity) {
+      case 'critical': return 'high';
+      case 'high': return 'medium';
+      case 'medium': return 'low';
+      case 'low': return 'low';
+    }
   }
 
   /**
@@ -260,42 +329,48 @@ export class RuleEngine {
   }
 
   /**
-   * 청정지수 계산 (신뢰도 반영)
+   * 청정지수 계산 (4단계 심각도 + 영역 가중치)
    */
-  private calculateScore(matches: PatternMatch[]): ScoreResult {
-    const severityDeductions = { critical: 0, major: 0, minor: 0 };
+  private calculateScore(violations: ViolationResult[], sectionType?: string): ScoreResult {
+    const severityDeductions = { critical: 0, high: 0, medium: 0, low: 0 };
+    const severityCounts = { critical: 0, high: 0, medium: 0, low: 0 };
     const categoryDeductions: Record<string, number> = {};
+    const sectionWeight = SECTION_WEIGHTS[sectionType || 'default'] || 1.0;
 
     let totalDeduction = 0;
 
-    for (const match of matches) {
-      const baseDeduction = SEVERITY_DEDUCTIONS[match.severity];
-      const categoryWeight = CATEGORY_WEIGHTS[match.category] || 1.0;
-      const confidenceMultiplier = match.confidence;
-      const weightedDeduction = baseDeduction * categoryWeight * confidenceMultiplier;
+    for (const violation of violations) {
+      const baseDeduction = SEVERITY_DEDUCTIONS[violation.severity] || 5;
+      const categoryWeight = CATEGORY_WEIGHTS[this.reverseMapType(violation.type)] || 1.0;
+      const confidenceMultiplier = violation.confidence;
+      const weightedDeduction = baseDeduction * categoryWeight * sectionWeight * confidenceMultiplier;
 
-      severityDeductions[match.severity] += Math.round(baseDeduction * confidenceMultiplier);
+      severityDeductions[violation.severity] += Math.round(baseDeduction * confidenceMultiplier);
+      severityCounts[violation.severity]++;
 
-      if (!categoryDeductions[match.category]) {
-        categoryDeductions[match.category] = 0;
+      const categoryName = this.reverseMapType(violation.type);
+      if (!categoryDeductions[categoryName]) {
+        categoryDeductions[categoryName] = 0;
       }
-      categoryDeductions[match.category] += Math.round(weightedDeduction);
+      categoryDeductions[categoryName] += Math.round(weightedDeduction);
 
       totalDeduction += weightedDeduction;
     }
 
     totalDeduction = Math.min(100, Math.round(totalDeduction));
     const cleanScore = Math.max(0, 100 - totalDeduction);
-    const grade = this.calculateGrade(cleanScore);
+    const grade = this.calculateGrade(severityCounts);
     const gradeInfo = GRADE_INFO[grade];
 
     return {
       cleanScore,
       totalDeduction,
       severityDeductions,
+      severityCounts,
       categoryDeductions,
       grade,
       gradeInfo,
+      sectionType,
       // 이전 버전 호환성
       totalScore: cleanScore,
       gradeDescription: GRADE_DESCRIPTIONS[grade],
@@ -304,14 +379,32 @@ export class RuleEngine {
   }
 
   /**
-   * 등급 계산
+   * ViolationType → 카테고리명 역매핑
    */
-  private calculateGrade(cleanScore: number): AnalysisGrade {
-    if (cleanScore === 100) return 'S';
-    if (cleanScore >= 90) return 'A';
-    if (cleanScore >= 70) return 'B';
-    if (cleanScore >= 50) return 'C';
-    if (cleanScore >= 30) return 'D';
+  private reverseMapType(type: ViolationType): string {
+    const mapping: Record<ViolationType, string> = {
+      'guarantee': '치료효과보장',
+      'false_claim': '부작용부정',
+      'exaggeration': '최상급표현',
+      'comparison': '비교광고',
+      'price_inducement': '환자유인',
+      'before_after': '전후사진',
+      'testimonial': '체험기',
+      'prohibited_expression': '금지어',
+      'other': '기타',
+    };
+    return mapping[type] || '기타';
+  }
+
+  /**
+   * 등급 계산 (카운트 기반)
+   */
+  private calculateGrade(counts: { critical: number; high: number; medium: number; low: number }): AnalysisGrade {
+    if (counts.critical === 0 && counts.high === 0 && counts.medium === 0 && counts.low === 0) return 'S';
+    if (counts.critical === 0 && counts.high === 0 && counts.medium <= 2) return 'A';
+    if (counts.critical === 0 && counts.high <= 1) return 'B';
+    if (counts.critical === 0) return 'C';
+    if (counts.critical <= 2) return 'D';
     return 'F';
   }
 
@@ -342,10 +435,15 @@ export class RuleEngine {
       return recommendations;
     }
 
-    // 심각도별 개수
+    // 심각도별 개수 (4단계)
+    const criticalCount = violations.filter(v => v.severity === 'critical').length;
     const highCount = violations.filter(v => v.severity === 'high').length;
     const mediumCount = violations.filter(v => v.severity === 'medium').length;
     const lowCount = violations.filter(v => v.severity === 'low').length;
+
+    if (criticalCount > 0) {
+      recommendations.push(`⛈️ 즉시 수정 ${criticalCount}건: 법적 위반 가능성이 높아요`);
+    }
 
     if (highCount > 0) {
       recommendations.push(`🌧️ 수정 권장 ${highCount}건: 심의에서 지적받을 수 있어요`);

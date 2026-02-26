@@ -15,6 +15,56 @@
 import patternsData from '../../../patterns/patterns.json';
 
 // ============================================
+// 네거티브 리스트 (비위반 항목 제외)
+// ============================================
+
+/**
+ * 장비명, 약품명, 스킨케어 등 위반이 아닌 항목
+ * 매칭된 텍스트가 이 항목들만으로 구성되면 필터링
+ */
+const NEGATIVE_LIST: Record<string, string[]> = {
+  // 의료기기/장비명
+  equipment: [
+    'TORR RF', '울쎄라', '써마지', '인모드', '슈링크',
+    '포텐자', '리쥬란', '쥬베룩', '볼뉴머', '실펌',
+    '피코슈어', '레블라이트', '클래리티', '젠틀맥스',
+    '올리지오', '텐써마', '더모톡신', '소노퀸', '더블로',
+    '울트라포머', '이브아르', '엘란쎄', '스칼렛',
+    'FLX', 'MPT', 'HIFU', 'IPL', 'RF',
+  ],
+
+  // 주사제/약품명
+  medications: [
+    '보톡스', '디스포트', '제오민', '나보타', '보툴렉스',
+    '쥬비덤', '레스틸렌', '벨로테로', '볼류마', '볼벨라',
+    '리도카인', '히알루론산', '필러', '메조테라피',
+    '스컬트라', '래디어스', '엑소좀', 'PRP', 'PDRN',
+  ],
+
+  // 화장품/스킨케어
+  skincare: [
+    '선크림', '보습제', '클렌저', '토너', '세럼',
+    '레티놀', '비타민C', '나이아신아마이드', '세라마이드',
+    'AHA', 'BHA', 'EGF', '펩타이드',
+  ],
+
+  // 진료과목/의료 용어 (단독 사용 시 비위반)
+  medicalTerms: [
+    '피부과', '성형외과', '치과', '안과', '산부인과',
+    '내과', '외과', '정형외과', '비뇨기과', '이비인후과',
+    '전문의', '원장', '대표원장', '부원장',
+    '사업자등록번호', '의료기관번호',
+  ],
+};
+
+/**
+ * 정규화된 네거티브 리스트 캐시
+ */
+const NORMALIZED_NEGATIVE_ITEMS: string[] = Object.values(NEGATIVE_LIST)
+  .flat()
+  .map(item => item.toLowerCase().replace(/\s/g, ''));
+
+// ============================================
 // 맥락 예외 정의 (오탐 방지)
 // ============================================
 
@@ -116,7 +166,7 @@ const CONTEXT_EXCEPTIONS: ContextException[] = [
     patterns: [
       /(?:만약|가령|예를\s*들어|예컨대)\s*/,
       /(?:경우|상황)\s*(?:에는|에서는|라면)/,
-      /~?(?:ㄴ다면|한다면|라면|면)\s/,
+      /(?:ㄴ다면|한다면|라면|이라면|였다면|었다면)\s/,
     ],
     description: '조건문 또는 가정 상황',
   },
@@ -166,6 +216,8 @@ export interface PatternMatch {
   };
   /** 문장 단위 고유 ID */
   sentenceId?: number;
+  /** 면책조항/법적고지가 같은 문장/영역에 있는지 여부 */
+  disclaimerDetected?: boolean;
 }
 
 /**
@@ -246,6 +298,9 @@ export class PatternMatcher {
       ? this.findSentenceBoundaries(text)
       : [];
 
+    // 페이지 수준 면책조항 감지 (같은 페이지에 면책조항이 있으면 모든 위반에 적용)
+    const pageHasDisclaimer = this.checkPageDisclaimer(text);
+
     // 검사 대상 패턴 필터링
     let targetPatterns = this.patterns;
 
@@ -290,14 +345,23 @@ export class PatternMatcher {
           if (isException) continue;
         }
 
+        // 네거티브 리스트 체크 (장비명/약품명/스킨케어 등)
+        if (this.isNegativeMatch(matchedText)) continue;
+
         // 컨텍스트 추출
         const context = this.extractContext(text, position, endPosition, contextLength);
 
         // 신뢰도 계산
         let confidence = this.calculateConfidence(pattern, matchedText, context);
 
-        // ✅ 수정: 맥락 예외 검사 - 감지 시 완전 필터링!
+        // ✅ v1.1 맥락 예외 검사
+        // - DISCLAIMER/LEGAL_NOTICE → 완전 필터링 대신 disclaimerDetected 마킹 (rule-engine에서 심각도 하향)
+        // - 그 외 (NEGATION, QUESTION, QUOTATION, NEGATIVE_EXAMPLE, CONDITIONAL) → 완전 필터링
+        // - 부작용부정(02) 카테고리는 부정어 예외를 적용하지 않음
+        // 면책조항 감지: 문장 수준 또는 페이지 수준
+        let disclaimerDetected = pageHasDisclaimer;
         if (enableContextExceptionFilter) {
+          const skipNegationFilter = pattern.category === '부작용부정';
           const exceptionCheck = this.checkContextExceptions(
             text,
             position,
@@ -305,9 +369,16 @@ export class PatternMatcher {
             contextExceptionRange
           );
           if (exceptionCheck) {
-            // ✅ 맥락 예외 감지 시 완전히 건너뜀 (continue)
-            // 부정문, 면책조항 등이 있으면 위반으로 보지 않음
-            continue;
+            if (exceptionCheck.type === 'DISCLAIMER' || exceptionCheck.type === 'LEGAL_NOTICE') {
+              // 문장 수준 면책조항/법적고지 → 필터링 안 함, 심각도 하향 마킹만
+              disclaimerDetected = true;
+            } else if (skipNegationFilter && (
+              exceptionCheck.type === 'NEGATION_BEFORE' || exceptionCheck.type === 'NEGATION_AFTER'
+            )) {
+              // 부작용부정 카테고리는 부정어 필터링 건너뜀
+            } else {
+              continue;
+            }
           }
         }
 
@@ -339,6 +410,7 @@ export class PatternMatcher {
           description: pattern.description,
           suggestion: pattern.suggestion,
           sentenceId,
+          disclaimerDetected,
         });
       }
     }
@@ -438,8 +510,22 @@ export class PatternMatcher {
       }
     }
 
-    // 최대 0.95, 최소 0.5로 제한
-    return Math.max(0.5, Math.min(0.95, confidence));
+    // ✅ 네비게이션/메뉴 텍스트 감지 (오탐 방지)
+    // 구분자가 2개 이상이면 메뉴/네비게이션으로 판단
+    const navSeparators = [' - ', ' > ', ' | ', ' · ', ' → ', ' >> ', '-->'];
+    let navSepCount = 0;
+    for (const sep of navSeparators) {
+      const escaped = sep.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      navSepCount += (context.match(new RegExp(escaped, 'g')) || []).length;
+    }
+    if (navSepCount >= 2) {
+      confidence -= 0.5; // 네비게이션 텍스트일 가능성 높음
+    } else if (navSepCount >= 1) {
+      confidence -= 0.15; // 구분자 1개는 약간 감점
+    }
+
+    // 최대 0.95, 최소 0.1로 제한 (nav 감지 시 0.5 미만으로 떨어질 수 있도록)
+    return Math.max(0.1, Math.min(0.95, confidence));
   }
 
   /**
@@ -470,10 +556,13 @@ export class PatternMatcher {
         let matched = false;
 
         switch (exception.type) {
-          case 'NEGATION_BEFORE':
-            // 앞에 부정어가 있는지 확인
-            matched = pattern.test(beforeText);
+          case 'NEGATION_BEFORE': {
+            // 앞에 부정어가 있는지 확인 (같은 문장 내에서만)
+            const sentStart = this.findSentenceStart(text, position);
+            const boundedBefore = text.slice(Math.max(sentStart, position - range), position);
+            matched = pattern.test(boundedBefore);
             break;
+          }
 
           case 'NEGATION_AFTER':
             // 뒤에 부정어가 있는지 확인
@@ -660,6 +749,51 @@ export class PatternMatcher {
     return this.match(text, { categories: [pattern.category] }).filter(
       m => m.patternId === patternId
     );
+  }
+
+  /**
+   * 네거티브 리스트 매칭 체크
+   * 매칭된 텍스트가 장비명/약품명/스킨케어명만으로 구성되면 true
+   */
+  private isNegativeMatch(matchedText: string): boolean {
+    const normalized = matchedText.toLowerCase().replace(/\s/g, '');
+    if (normalized.length === 0) return false;
+
+    for (const item of NORMALIZED_NEGATIVE_ITEMS) {
+      // 매칭 텍스트가 네거티브 항목과 같거나, 네거티브 항목만으로 구성
+      if (normalized === item || item === normalized) {
+        return true;
+      }
+      // 매칭 텍스트가 네거티브 항목을 포함하고 그 외 의미있는 내용이 없는 경우
+      if (normalized.length <= item.length + 3 && normalized.includes(item)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * 페이지 수준 면책조항 감지
+   * 텍스트 전체에서 면책조항 패턴이 있는지 확인
+   */
+  private checkPageDisclaimer(text: string): boolean {
+    const disclaimerPatterns = [
+      /개인에?\s*따라\s*(?:결과|효과)가?\s*(?:다를|차이가)\s*수\s*있/,
+      /개인\s*차이?\s*가?\s*있을\s*수\s*있/,
+      /시술\s*전\s*전문의?\s*상담/,
+      /부작용이?\s*(?:발생|나타날)\s*수\s*있/,
+      /결과를?\s*보장하지?\s*않/,
+      /의료법\s*제\s*56조/,
+      /개인\s*체질에?\s*따라/,
+      /효과에?\s*(?:는\s*)?개인\s*차이/,
+    ];
+
+    for (const pattern of disclaimerPatterns) {
+      if (pattern.test(text)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

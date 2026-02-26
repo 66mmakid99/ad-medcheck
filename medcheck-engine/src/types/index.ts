@@ -71,7 +71,7 @@ export interface ModuleOutput {
 /**
  * 위반 심각도 레벨
  */
-export type ViolationSeverity = 'high' | 'medium' | 'low';
+export type ViolationSeverity = 'critical' | 'high' | 'medium' | 'low';
 
 /**
  * 위반 상태

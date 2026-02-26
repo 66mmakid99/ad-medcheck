@@ -174,9 +174,10 @@ analyzeRoutes.post('/', async (c) => {
   try {
     const startTime = Date.now();
 
-    // 1. 패턴 매칭 분석
+    // 1. 패턴 매칭 분석 (URL 메타데이터로 영역 감지)
     const result = violationDetector.analyze({
       text: body.text,
+      url: body.metadata?.url,
       options: {
         categories: body.options?.categories,
         minSeverity: body.options?.minSeverity,
@@ -401,8 +402,8 @@ analyzeRoutes.post('-url', async (c) => {
       }, 400);
     }
 
-    // 3. 패턴 매칭 분석
-    const result = violationDetector.analyze({ text: textContent });
+    // 3. 패턴 매칭 분석 (URL로 영역 감지)
+    const result = violationDetector.analyze({ text: textContent, url: targetUrl });
 
     const totalProcessingTime = Date.now() - startTime;
 
@@ -844,8 +845,8 @@ analyzeRoutes.post('/url-with-images', async (c) => {
         .trim()
         .substring(0, 50000);
 
-      // 패턴 매칭 분석
-      const textResult = violationDetector.analyze({ text: textContent });
+      // 패턴 매칭 분석 (URL로 영역 감지)
+      const textResult = violationDetector.analyze({ text: textContent, url: body.url });
       results.textAnalysis = {
         analysisId: textResult.id,
         inputLength: textResult.inputLength,
@@ -908,8 +909,8 @@ analyzeRoutes.post('/url-with-images', async (c) => {
                     imgViolation.type === 'TESTIMONIAL' ? 'testimonial' : 'other',
             status: imgViolation.confidence >= 0.85 ? 'violation' :
               imgViolation.confidence >= 0.7 ? 'likely' : 'possible',
-            severity: imgViolation.severity === 'critical' ? 'high' :
-              imgViolation.severity === 'major' ? 'medium' : 'low',
+            severity: imgViolation.severity === 'critical' ? 'critical' :
+              imgViolation.severity === 'major' ? 'high' : 'medium',
             matchedText: imgViolation.text,
             description: imgViolation.description,
             legalBasis: imgViolation.legalBasis ? [{

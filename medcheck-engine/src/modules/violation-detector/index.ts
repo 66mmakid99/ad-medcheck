@@ -49,6 +49,8 @@ export interface DetectionRequest {
   text: string;
   /** 옵션 */
   options?: MatchOptions;
+  /** 분석 대상 URL (영역 감지용) */
+  url?: string;
   /** 확장 분석 활성화 (기본: true) */
   enableExtendedAnalysis?: boolean;
   /** 복합 위반 탐지 활성화 (기본: true) */
@@ -124,6 +126,26 @@ export class ViolationDetector {
   }
 
   /**
+   * URL/텍스트에서 영역(섹션) 감지
+   */
+  private detectSection(url?: string, text?: string): string {
+    if (url) {
+      if (/event|이벤트|할인|프로모션|discount|sale/i.test(url)) return 'event';
+      if (/treatment|시술|surgery|수술|procedure/i.test(url)) return 'treatment';
+      if (/faq|자주\s*묻는|qa|qna/i.test(url)) return 'faq';
+      if (/review|후기|전후|before.?after/i.test(url)) return 'review';
+      if (/doctor|의료진|원장|staff|team/i.test(url)) return 'doctor';
+    }
+    if (text) {
+      const firstPart = text.substring(0, 500);
+      if (/이벤트|할인|프로모션|특가|세일/.test(firstPart)) return 'event';
+      if (/자주\s*묻는|FAQ|Q\s*&\s*A/i.test(firstPart)) return 'faq';
+      if (/후기|리뷰|전후|체험/.test(firstPart)) return 'review';
+    }
+    return 'default';
+  }
+
+  /**
    * 텍스트 분석 수행 (통합 분석)
    */
   analyze(request: DetectionRequest): DetectionResponse {
@@ -131,6 +153,7 @@ export class ViolationDetector {
     const {
       text,
       options,
+      url,
       enableExtendedAnalysis = true,
       enableCompoundDetection = true,
       enableDepartmentRules = true,
@@ -139,11 +162,14 @@ export class ViolationDetector {
       department,
     } = request;
 
+    // 0. 영역 감지
+    const sectionType = this.detectSection(url, text);
+
     // 1. 패턴 매칭 (오탐 방지 강화 적용)
     const matches = this.matcher.match(text, options);
 
-    // 2. 위반 판정
-    const judgment = this.engine.judge(matches);
+    // 2. 위반 판정 (영역 가중치 적용)
+    const judgment = this.engine.judge(matches, sectionType);
 
     // 3. 분석 ID 생성
     const id = this.generateAnalysisId();

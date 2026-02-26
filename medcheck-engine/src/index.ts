@@ -44,6 +44,7 @@ import {
   crawlerRoutes,
   reportRoutes,
   aeoRoutes,
+  viralRoutes,
 } from './api/routes';
 import type { AppBindings, Env } from './types/env';
 
@@ -478,6 +479,7 @@ app.route('/api/ocr', ocrPipelineRoutes);
 app.route('/api/crawler', crawlerRoutes);
 app.route('/v1/report', reportRoutes);
 app.route('/v1/aeo', aeoRoutes);
+app.route('/v1/viral', viralRoutes);
 
 // 병원별 스크린샷
 app.get('/v1/hospitals/:hospitalId/screenshots', async (c) => {

@@ -32,3 +32,4 @@ export { ocrPipelineRoutes } from './ocr-pipeline';
 export { crawlerRoutes } from './crawler';
 export { reportRoutes } from './report';
 export { aeoRoutes } from './aeo';
+export { viralRoutes } from './viral';

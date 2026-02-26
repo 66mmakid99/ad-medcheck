@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import PriceAnalytics from './PriceAnalytics';
 import AeoGeoDashboard from './AeoGeoDashboard';
+import ViralDashboard from './ViralDashboard';
 
 // ============================================
 // MEDCHECK Engine 대시보드 v2.0 - 레퍼런스 스타일
@@ -113,6 +114,7 @@ export default function MedCheckDashboard() {
     { id: 'ocr', name: 'OCR 분석', icon: '🖼️' },
     { id: 'crawler', name: '크롤러 현황', icon: '🕷️' },
     { id: 'aeoGeo', name: 'AG MedCheck', icon: '🤖' },
+    { id: 'viral', name: 'Viral MedCheck', icon: '📣' },
   ];
 
   if (loading) {
@@ -294,6 +296,7 @@ export default function MedCheckDashboard() {
           {activeTab === 'ocr' && <OcrTab apiBase={API_BASE} />}
           {activeTab === 'crawler' && <CrawlerTab apiBase={API_BASE} />}
           {activeTab === 'aeoGeo' && <AeoGeoDashboard />}
+          {activeTab === 'viral' && <ViralDashboard />}
         </main>
       </div>
     </div>

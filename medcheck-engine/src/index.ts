@@ -52,7 +52,7 @@ import type { AppBindings, Env } from './types/env';
 
 // [신규] 클라우드 크롤러 + 파이프라인
 import { handleScheduled, handleManualTriggers } from './scheduled/crawler-handler';
-import { runAnalysisPipeline, savePipelineResult } from './services/analysis-pipeline';
+import { runAnalysisPipeline, savePipelineResult, runGeminiPipeline } from './services/analysis-pipeline';
 
 const app = new Hono<AppBindings>();
 
@@ -76,12 +76,521 @@ app.get('/', (c) => {
 });
 
 app.get('/v1/health', (c) => {
-  return c.json({ 
-    status: 'healthy', 
-    timestamp: new Date().toISOString(), 
+  return c.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
     version: '2.0.0',
     cronEnabled: true,
   });
+});
+
+// ============================================
+// [Phase 1] Gemini 위반 분석 테스트 API
+// ============================================
+
+import { loadPatternsForPrompt } from './services/pattern-loader';
+import { buildViolationPrompt, estimateTokenCount } from './services/gemini-violation-prompt';
+import { callGeminiForViolation } from './services/gemini-client';
+import { GeminiAuditor } from './services/gemini-auditor';
+import { syncSalesDataForMedcheck, syncMedcheckDataForSales } from './services/cross-intelligence';
+import { PatternTuner } from './services/pattern-tuner';
+import { GrayZoneCollector } from './services/gray-zone-collector';
+import { generatePreviewReport, generateFullReport, generateColdEmail } from './services/report-generator';
+
+/**
+ * GET /v1/gemini/prompt-info
+ * 생성된 프롬프트 정보 (토큰 수, 구조)
+ */
+app.get('/v1/gemini/prompt-info', (c) => {
+  const config = loadPatternsForPrompt();
+  const prompt = buildViolationPrompt(config);
+  const tokens = estimateTokenCount(prompt);
+  return c.json({
+    promptCharCount: prompt.length,
+    estimatedTokens: tokens,
+    tokenTarget: 30000,
+    underTarget: tokens < 30000,
+    dictionaries: {
+      patterns: config.patterns.length,
+      negativeList: config.negativeList.length,
+      disclaimerRules: config.disclaimerRules.length,
+      departmentRules: config.departmentRules.length,
+      contextExceptions: config.contextExceptions.length,
+      sectionWeights: config.sectionWeights.length,
+    },
+  });
+});
+
+/**
+ * POST /v1/gemini/analyze
+ * Gemini 위반 분석 직접 호출 (Phase 1 테스트용)
+ */
+app.post('/v1/gemini/analyze', async (c) => {
+  try {
+    const apiKey = c.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return c.json({ success: false, error: 'GEMINI_API_KEY not configured' }, 500);
+    }
+
+    const rawBuffer = await c.req.arrayBuffer();
+    let bodyText = new TextDecoder('utf-8').decode(rawBuffer);
+    if (bodyText.includes('\uFFFD')) {
+      bodyText = new TextDecoder('euc-kr', { fatal: false }).decode(rawBuffer);
+    }
+    const body = JSON.parse(bodyText) as { text: string };
+
+    if (!body.text) {
+      return c.json({ success: false, error: 'text는 필수입니다' }, 400);
+    }
+
+    const config = loadPatternsForPrompt();
+    const prompt = buildViolationPrompt(config);
+    const startTime = Date.now();
+    const result = await callGeminiForViolation(prompt, { text: body.text }, apiKey);
+    const elapsed = Date.now() - startTime;
+
+    return c.json({
+      success: true,
+      elapsed_ms: elapsed,
+      prompt_tokens: estimateTokenCount(prompt),
+      result,
+    });
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: (error as Error).message,
+    }, 500);
+  }
+});
+
+/**
+ * POST /v1/gemini/analyze-full
+ * Gemini 분석 + GeminiAuditor 사후 검증 전체 파이프라인 (Phase 2 테스트용)
+ */
+app.post('/v1/gemini/analyze-full', async (c) => {
+  try {
+    const apiKey = c.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return c.json({ success: false, error: 'GEMINI_API_KEY not configured' }, 500);
+    }
+
+    const rawBuffer = await c.req.arrayBuffer();
+    let bodyText = new TextDecoder('utf-8').decode(rawBuffer);
+    if (bodyText.includes('\uFFFD')) {
+      bodyText = new TextDecoder('euc-kr', { fatal: false }).decode(rawBuffer);
+    }
+    const body = JSON.parse(bodyText) as { text: string };
+
+    if (!body.text) {
+      return c.json({ success: false, error: 'text는 필수입니다' }, 400);
+    }
+
+    const config = loadPatternsForPrompt();
+    const prompt = buildViolationPrompt(config);
+    const startTime = Date.now();
+
+    // Step 1: Gemini 호출
+    const geminiResult = await callGeminiForViolation(prompt, { text: body.text }, apiKey);
+    const geminiElapsed = Date.now() - startTime;
+
+    // Step 2: GeminiAuditor 사후 검증
+    const auditor = new GeminiAuditor(config.patterns, config.negativeList, config.disclaimerRules);
+    const auditResult = auditor.audit(geminiResult, body.text);
+    const totalElapsed = Date.now() - startTime;
+
+    return c.json({
+      success: true,
+      gemini_elapsed_ms: geminiElapsed,
+      total_elapsed_ms: totalElapsed,
+      audit: {
+        geminiOriginalCount: auditResult.geminiOriginalCount,
+        finalCount: auditResult.finalCount,
+        auditDelta: auditResult.auditDelta,
+        issues: auditResult.auditIssues,
+      },
+      grade: auditResult.grade,
+      violations: auditResult.finalViolations.map(v => ({
+        patternId: v.patternId,
+        category: v.category,
+        severity: v.severity,
+        adjustedSeverity: v.adjustedSeverity,
+        originalText: v.originalText,
+        confidence: v.confidence,
+        reasoning: v.reasoning,
+        disclaimerPresent: v.disclaimerPresent,
+        source: v.source,
+      })),
+      grayZones: auditResult.grayZones,
+      mandatoryItems: auditResult.mandatoryItems,
+    });
+  } catch (error) {
+    return c.json({
+      success: false,
+      error: (error as Error).message,
+    }, 500);
+  }
+});
+
+// ============================================
+// [Phase 4] 크로스 인텔리전스 API
+// ============================================
+
+/**
+ * GET /v1/cross-intel/sales-data/:hospitalId
+ * MADMEDSALES에서 확정 장비/시술 가져오기 (테스트용)
+ */
+app.get('/v1/cross-intel/sales-data/:hospitalId', async (c) => {
+  try {
+    const supabaseUrl = c.env.SUPABASE_URL;
+    const supabaseKey = c.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) {
+      return c.json({ success: false, error: 'Supabase 환경변수 미설정 (SUPABASE_URL, SUPABASE_ANON_KEY)' }, 500);
+    }
+
+    const hospitalId = c.req.param('hospitalId');
+    const salesData = await syncSalesDataForMedcheck(hospitalId, supabaseUrl, supabaseKey);
+
+    return c.json({
+      success: true,
+      hospitalId,
+      confirmedDevices: salesData.confirmedDevices,
+      confirmedTreatments: salesData.confirmedTreatments,
+      dynamicNegativeCount: salesData.confirmedDevices.length + salesData.confirmedTreatments.length,
+    });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+/**
+ * POST /v1/cross-intel/sync-medcheck
+ * MADMEDCHECK 결과를 MADMEDSALES에 동기화 (테스트용)
+ */
+app.post('/v1/cross-intel/sync-medcheck', async (c) => {
+  try {
+    const supabaseUrl = c.env.SUPABASE_URL;
+    const supabaseKey = c.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) {
+      return c.json({ success: false, error: 'Supabase 환경변수 미설정' }, 500);
+    }
+
+    const apiKey = c.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      return c.json({ success: false, error: 'GEMINI_API_KEY not configured' }, 500);
+    }
+
+    const rawBuffer = await c.req.arrayBuffer();
+    let bodyText = new TextDecoder('utf-8').decode(rawBuffer);
+    if (bodyText.includes('\uFFFD')) {
+      bodyText = new TextDecoder('euc-kr', { fatal: false }).decode(rawBuffer);
+    }
+    const body = JSON.parse(bodyText) as {
+      url: string;
+      hospitalId: string;
+      hospitalName: string;
+    };
+
+    if (!body.url || !body.hospitalId) {
+      return c.json({ success: false, error: 'url, hospitalId 필수' }, 400);
+    }
+
+    // Gemini 파이프라인 실행 (크로스 인텔리전스 + Flywheel + Firecrawl fallback 포함)
+    const result = await runGeminiPipeline(
+      {
+        url: body.url,
+        hospitalId: body.hospitalId,
+        hospitalName: body.hospitalName,
+        supabaseUrl,
+        supabaseKey,
+        db: c.env.DB,
+        firecrawlUrl: c.env.FIRECRAWL_URL,
+        firecrawlApiKey: c.env.FIRECRAWL_API_KEY,
+      },
+      apiKey,
+    );
+
+    return c.json({
+      success: result.success,
+      grade: result.audit?.grade,
+      crossIntel: result.meta.crossIntel,
+      crawlMethod: result.meta.crawlMethod,
+      error: result.error,
+    });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+// ============================================
+// [Phase 6] Flywheel 피드백 API
+// ============================================
+
+/**
+ * POST /v1/flywheel/false-positive
+ * 오탐 신고
+ */
+app.post('/v1/flywheel/false-positive', async (c) => {
+  try {
+    const body = await c.req.json<{ analysisId: string; patternId: string; reason?: string }>();
+    if (!body.analysisId || !body.patternId) {
+      return c.json({ success: false, error: 'analysisId, patternId 필수' }, 400);
+    }
+    const tuner = new PatternTuner(c.env.DB);
+    const result = await tuner.reportFalsePositive(body.analysisId, body.patternId, body.reason);
+    return c.json({ success: true, ...result });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+/**
+ * POST /v1/flywheel/false-negative
+ * 미탐 신고
+ */
+app.post('/v1/flywheel/false-negative', async (c) => {
+  try {
+    const body = await c.req.json<{ analysisId: string; description: string; category?: string }>();
+    if (!body.analysisId || !body.description) {
+      return c.json({ success: false, error: 'analysisId, description 필수' }, 400);
+    }
+    const tuner = new PatternTuner(c.env.DB);
+    const result = await tuner.reportFalseNegative(body.analysisId, body.description, body.category);
+    return c.json({ success: true, ...result });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+/**
+ * GET /v1/flywheel/pattern-candidates
+ * 신규 패턴 후보 목록
+ */
+app.get('/v1/flywheel/pattern-candidates', async (c) => {
+  try {
+    const status = c.req.query('status') || 'pending';
+    const tuner = new PatternTuner(c.env.DB);
+    const candidates = await tuner.getPatternCandidates(status);
+    return c.json({ success: true, data: candidates });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+/**
+ * POST /v1/flywheel/pattern-candidates/:id/approve
+ */
+app.post('/v1/flywheel/pattern-candidates/:id/approve', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'));
+    const body = await c.req.json<{ patternId: string }>();
+    const tuner = new PatternTuner(c.env.DB);
+    await tuner.approvePatternCandidate(id, body.patternId);
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+/**
+ * POST /v1/flywheel/pattern-candidates/:id/reject
+ */
+app.post('/v1/flywheel/pattern-candidates/:id/reject', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'));
+    const tuner = new PatternTuner(c.env.DB);
+    await tuner.rejectPatternCandidate(id);
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+/**
+ * GET /v1/flywheel/weak-patterns
+ * 저성능 패턴 목록
+ */
+app.get('/v1/flywheel/weak-patterns', async (c) => {
+  try {
+    const tuner = new PatternTuner(c.env.DB);
+    const patterns = await tuner.getWeakPatterns();
+    return c.json({ success: true, data: patterns });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+// ============================================
+// [Phase 7] Gray Zone 관리 API
+// ============================================
+
+/**
+ * GET /v1/gray-zones
+ * Gray Zone 사례 목록
+ */
+app.get('/v1/gray-zones', async (c) => {
+  try {
+    const status = c.req.query('status') || 'pending';
+    const limit = Math.min(parseInt(c.req.query('limit') || '20'), 100);
+    const collector = new GrayZoneCollector(c.env.DB);
+    const cases = await collector.list(status, limit);
+    return c.json({ success: true, data: cases });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+/**
+ * POST /v1/gray-zones/:id/verdict
+ * Gray Zone 사례 판정
+ */
+app.post('/v1/gray-zones/:id/verdict', async (c) => {
+  try {
+    const id = parseInt(c.req.param('id'));
+    const body = await c.req.json<{
+      verdict: 'violation' | 'borderline' | 'legal';
+      reasoning: string;
+      addToPrompt?: boolean;
+    }>();
+    if (!body.verdict || !body.reasoning) {
+      return c.json({ success: false, error: 'verdict, reasoning 필수' }, 400);
+    }
+    const collector = new GrayZoneCollector(c.env.DB);
+    await collector.verdict(id, body.verdict, body.reasoning, body.addToPrompt ?? false);
+    return c.json({ success: true });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+/**
+ * GET /v1/gray-zones/trends
+ * Gray Zone 트렌드 통계
+ */
+app.get('/v1/gray-zones/trends', async (c) => {
+  try {
+    const collector = new GrayZoneCollector(c.env.DB);
+    const trends = await collector.getTrends();
+    return c.json({ success: true, data: trends });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+/**
+ * GET /v1/gray-zones/prompt-examples
+ * Gemini 프롬프트에 주입할 승인된 사례 목록
+ */
+app.get('/v1/gray-zones/prompt-examples', async (c) => {
+  try {
+    const collector = new GrayZoneCollector(c.env.DB);
+    const examples = await collector.getApprovedExamples();
+    return c.json({ success: true, data: examples, count: examples.length });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+// ============================================
+// [Phase 8] 리포트 + 콜드메일 API
+// ============================================
+
+/**
+ * POST /v1/report/generate
+ * 분석 결과 기반 리포트 생성
+ */
+app.post('/v1/report/generate', async (c) => {
+  try {
+    const apiKey = c.env.GEMINI_API_KEY;
+    if (!apiKey) return c.json({ success: false, error: 'GEMINI_API_KEY not configured' }, 500);
+
+    const rawBuffer = await c.req.arrayBuffer();
+    let bodyText = new TextDecoder('utf-8').decode(rawBuffer);
+    if (bodyText.includes('\uFFFD')) {
+      bodyText = new TextDecoder('euc-kr', { fatal: false }).decode(rawBuffer);
+    }
+    const body = JSON.parse(bodyText) as {
+      url: string;
+      hospitalName?: string;
+      hospitalId?: string;
+      type?: 'preview' | 'full';
+    };
+
+    if (!body.url) return c.json({ success: false, error: 'url 필수' }, 400);
+
+    const result = await runGeminiPipeline(
+      {
+        url: body.url,
+        hospitalId: body.hospitalId,
+        hospitalName: body.hospitalName,
+        supabaseUrl: c.env.SUPABASE_URL,
+        supabaseKey: c.env.SUPABASE_ANON_KEY,
+        db: c.env.DB,
+        firecrawlUrl: c.env.FIRECRAWL_URL,
+        firecrawlApiKey: c.env.FIRECRAWL_API_KEY,
+      },
+      apiKey,
+    );
+
+    if (!result.success || !result.audit) {
+      return c.json({ success: false, error: result.error });
+    }
+
+    const report = body.type === 'full'
+      ? generateFullReport(result.audit, body.hospitalName || '병원')
+      : generatePreviewReport(result.audit, body.hospitalName || '병원');
+
+    return c.json({ success: true, report, meta: result.meta });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
+});
+
+/**
+ * POST /v1/cold-email/generate
+ * 콜드메일 자동 생성
+ */
+app.post('/v1/cold-email/generate', async (c) => {
+  try {
+    const apiKey = c.env.GEMINI_API_KEY;
+    if (!apiKey) return c.json({ success: false, error: 'GEMINI_API_KEY not configured' }, 500);
+
+    const rawBuffer = await c.req.arrayBuffer();
+    let bodyText = new TextDecoder('utf-8').decode(rawBuffer);
+    if (bodyText.includes('\uFFFD')) {
+      bodyText = new TextDecoder('euc-kr', { fatal: false }).decode(rawBuffer);
+    }
+    const body = JSON.parse(bodyText) as {
+      url: string;
+      hospitalName?: string;
+      hospitalId?: string;
+    };
+
+    if (!body.url) return c.json({ success: false, error: 'url 필수' }, 400);
+
+    const result = await runGeminiPipeline(
+      {
+        url: body.url,
+        hospitalId: body.hospitalId,
+        hospitalName: body.hospitalName,
+        supabaseUrl: c.env.SUPABASE_URL,
+        supabaseKey: c.env.SUPABASE_ANON_KEY,
+        db: c.env.DB,
+        firecrawlUrl: c.env.FIRECRAWL_URL,
+        firecrawlApiKey: c.env.FIRECRAWL_API_KEY,
+      },
+      apiKey,
+    );
+
+    if (!result.success || !result.audit) {
+      return c.json({ success: false, error: result.error });
+    }
+
+    const email = generateColdEmail(result.audit, body.hospitalName || '병원');
+
+    return c.json({ success: true, email, meta: result.meta });
+  } catch (error) {
+    return c.json({ success: false, error: (error as Error).message }, 500);
+  }
 });
 
 // ============================================
@@ -91,8 +600,9 @@ app.get('/v1/health', (c) => {
 /**
  * POST /v1/pipeline/analyze
  * URL을 넣으면 전체 분석 파이프라인 실행 + DB 저장
- * 
- * 대시보드의 "URL 분석" 탭에서 호출합니다.
+ *
+ * mode: 'gemini' → Gemini 2.5 Flash 파이프라인 (Phase 3)
+ * mode: 'legacy' 또는 생략 → 기존 규칙엔진 파이프라인
  */
 app.post('/v1/pipeline/analyze', async (c) => {
   try {
@@ -104,19 +614,49 @@ app.post('/v1/pipeline/analyze', async (c) => {
     }
     const body = JSON.parse(bodyText) as {
       url: string;
-      hospitalId?: number;
+      hospitalId?: number | string;
       hospitalName?: string;
       enableAI?: boolean;
+      mode?: 'gemini' | 'legacy';
+      confirmedDevices?: string[];
+      confirmedTreatments?: string[];
     };
 
     if (!body.url) {
       return c.json({ success: false, error: { code: 'INVALID_INPUT', message: 'url은 필수입니다' } }, 400);
     }
 
+    // ━━━━ Gemini 모드 ━━━━
+    if (body.mode === 'gemini') {
+      const apiKey = c.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        return c.json({ success: false, error: { code: 'NO_API_KEY', message: 'GEMINI_API_KEY not configured' } }, 500);
+      }
+
+      const geminiResult = await runGeminiPipeline(
+        {
+          url: body.url,
+          hospitalId: typeof body.hospitalId === 'number' ? String(body.hospitalId) : body.hospitalId,
+          hospitalName: body.hospitalName,
+          confirmedDevices: body.confirmedDevices,
+          confirmedTreatments: body.confirmedTreatments,
+          supabaseUrl: c.env.SUPABASE_URL,
+          supabaseKey: c.env.SUPABASE_ANON_KEY,
+          db: c.env.DB,
+          firecrawlUrl: c.env.FIRECRAWL_URL,
+          firecrawlApiKey: c.env.FIRECRAWL_API_KEY,
+        },
+        apiKey,
+      );
+
+      return c.json(geminiResult);
+    }
+
+    // ━━━━ Legacy 모드 (기존) ━━━━
     const result = await runAnalysisPipeline(
       {
         url: body.url,
-        hospitalId: body.hospitalId,
+        hospitalId: typeof body.hospitalId === 'number' ? body.hospitalId : undefined,
         hospitalName: body.hospitalName,
         enableAI: body.enableAI ?? !!c.env.GEMINI_API_KEY,
       },
@@ -126,7 +666,7 @@ app.post('/v1/pipeline/analyze', async (c) => {
     // DB 저장
     await savePipelineResult(c.env.DB, {
       url: body.url,
-      hospitalId: body.hospitalId,
+      hospitalId: typeof body.hospitalId === 'number' ? body.hospitalId : undefined,
       hospitalName: body.hospitalName,
       enableAI: body.enableAI,
     }, result);

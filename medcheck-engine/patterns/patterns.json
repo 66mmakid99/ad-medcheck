@@ -2855,7 +2855,7 @@
       "id": "P-56-42-003",
       "category": "가격표현",
       "subcategory": "보험 적용 오인",
-      "pattern": "(보험\\s*적용|건강보험)(?!.*비급여)",
+      "pattern": "(보험\\s*적용|건강보험)(?!.*비급여)(?!심사평가원)",
       "patternType": "regex",
       "keywords": [
         "보험 적용",
@@ -2866,7 +2866,7 @@
       "description": "보험 적용 여부를 오인하게 하는 표현",
       "example": "건강보험 적용 시술",
       "suggestion": "급여/비급여 구분 명확히 표시",
-      "exceptions": []
+      "exceptions": ["건강보험심사평가원"]
     },
     {
       "id": "P-56-42-004",

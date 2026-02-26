@@ -16,6 +16,14 @@ export type Env = {
   GEMINI_API_KEY?: string;
   /** Claude API Key (선택) */
   CLAUDE_API_KEY?: string;
+  /** Supabase URL (크로스 인텔리전스용) */
+  SUPABASE_URL?: string;
+  /** Supabase Anon Key */
+  SUPABASE_ANON_KEY?: string;
+  /** Firecrawl Self-hosted URL (Contabo VPS) */
+  FIRECRAWL_URL?: string;
+  /** Firecrawl API Key */
+  FIRECRAWL_API_KEY?: string;
 };
 
 export type AppBindings = { Bindings: Env };

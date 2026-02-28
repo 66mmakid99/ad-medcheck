@@ -18,7 +18,7 @@ import { postprocessViolations } from './result-postprocessor';
 import type { ViolationResult } from '../types';
 import { fetchWithEncoding } from '../utils/fetch-with-encoding';
 import { collectImagesFromHtml } from '../modules/image-collector';
-import { callGeminiVision, OCR_ONLY_PROMPT } from './gemini-ocr';
+import { GeminiFlashOCRClient } from '../adapters/ocr-adapter';
 
 // Phase 3: Gemini 파이프라인 통합
 import { loadPatternsForPrompt } from './pattern-loader';
@@ -267,20 +267,52 @@ export async function runAnalysisPipeline(
     const rawViolations = detectionResult.judgment.violations;
 
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-    // Step 3.2: 이미지 OCR
+    // Step 3.2: 이미지 OCR (Gemini Vision)
+    // - 이미지 분류 (PRICE_MENU / BEFORE_AFTER / EVENT 등)
+    // - 텍스트 추출 → 156개 패턴 매칭
+    // - 직접 위반 탐지 (전후사진, 효과보장, 과장 등)
+    // - 가격 정보 추출
     // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     let ocrViolations: any[] = [];
     if (geminiApiKey && html) {
       try {
-        const images = collectImagesFromHtml(html, {
+        const images = collectImagesFromHtml(html, input.url, {
           maxImages: 5, minWidth: 200, minHeight: 100,
           excludePatterns: [/logo/i, /icon/i, /favicon/i, /avatar/i],
         });
         if (images.length > 0) {
-          console.log(`[Pipeline] OCR: ${images.length}개 이미지 발견`);
+          console.log(`[Pipeline] OCR: ${images.length}개 이미지 처리 시작`);
+          const ocrClient = new GeminiFlashOCRClient({
+            apiKey: geminiApiKey,
+            model: 'gemini-2.0-flash',
+          });
           for (const img of images.slice(0, 5)) {
             try {
-              const ocrResult = await callGeminiVision(geminiApiKey, { url: img.url }, OCR_ONLY_PROMPT);
+              const ocrResult = await ocrClient.extract(img.url, {
+                extractPrices: true,
+                detectViolations: true,
+                analyzeVisualEmphasis: true,
+              });
+
+              // 1. Gemini Vision이 직접 탐지한 이미지 위반
+              //    (전후사진, 효과보장, 과장광고, 환자유인, 체험기 등)
+              if (ocrResult.violations && ocrResult.violations.length > 0) {
+                for (const v of ocrResult.violations) {
+                  ocrViolations.push({
+                    type: v.type,
+                    severity: v.severity,
+                    matchedText: v.text,
+                    description: v.description,
+                    legalBasis: v.legalBasis ? [{ article: v.legalBasis }] : [],
+                    confidence: v.confidence,
+                    source: 'ocr_vision',
+                    imageUrl: img.url,
+                  });
+                }
+                console.log(`[Pipeline] OCR 이미지 위반 탐지: ${ocrResult.violations.length}건`);
+              }
+
+              // 2. OCR 추출 텍스트 → 156개 패턴 매칭
               if (ocrResult.text && ocrResult.text.length > 20) {
                 const ocrDetection = violationDetector.analyze({
                   text: ocrResult.text,
@@ -289,10 +321,18 @@ export async function runAnalysisPipeline(
                   enableMandatoryCheck: false,
                 });
                 for (const v of ocrDetection.judgment.violations) {
-                  (v as any).source = 'ocr';
+                  (v as any).source = 'ocr_pattern';
                   (v as any).imageUrl = img.url;
                 }
                 ocrViolations.push(...ocrDetection.judgment.violations);
+              }
+
+              // 3. 이미지 분류 & 가격 추출 로깅
+              if (ocrResult.classification) {
+                console.log(`[Pipeline] 이미지 분류: ${ocrResult.classification.type} (신뢰도 ${Math.round(ocrResult.classification.confidence * 100)}%)`);
+              }
+              if (ocrResult.extractedPrices && ocrResult.extractedPrices.length > 0) {
+                console.log(`[Pipeline] OCR 가격 추출: ${ocrResult.extractedPrices.length}건`);
               }
             } catch (ocrError) {
               console.warn(`[Pipeline] OCR failed for ${img.url}:`, ocrError);

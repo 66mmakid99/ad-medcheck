@@ -2,6 +2,9 @@ import { Hono } from 'hono';
 import type { AppBindings } from '../../types/env';
 import { handleApiError } from '../../utils/error-handler';
 import { violationDetector } from '../../modules/violation-detector';
+import { runGeminiPipeline } from '../../services/analysis-pipeline';
+import type { GeminiPipelineResult } from '../../services/analysis-pipeline';
+import { saveCheckViolationResult } from '../../services/supabase-saver';
 
 const hospitalRoutes = new Hono<AppBindings>();
 
@@ -60,6 +63,7 @@ hospitalRoutes.get('/collected-hospitals', async (c) => {
 });
 
 // POST /v1/analyze-url - URL 기반 텍스트 분석
+// GEMINI_API_KEY가 있으면 Gemini 파이프라인 실행, 없거나 실패시 기존 패턴 매칭 fallback
 hospitalRoutes.post('/analyze-url', async (c) => {
   try {
     const { url, hospitalId, hospitalName } = await c.req.json();
@@ -75,7 +79,128 @@ hospitalRoutes.post('/analyze-url', async (c) => {
     }
 
     const startTime = Date.now();
+    const geminiApiKey = c.env.GEMINI_API_KEY;
 
+    // ━━━━ Gemini 파이프라인 (GEMINI_API_KEY가 있을 때) ━━━━
+    if (geminiApiKey) {
+      try {
+        const geminiResult: GeminiPipelineResult = await runGeminiPipeline(
+          {
+            url: targetUrl,
+            hospitalId: hospitalId ? String(hospitalId) : undefined,
+            hospitalName,
+            db: c.env.DB,
+            supabaseUrl: c.env.SUPABASE_URL,
+            supabaseKey: c.env.SUPABASE_ANON_KEY,
+            firecrawlUrl: c.env.FIRECRAWL_URL,
+            firecrawlApiKey: c.env.FIRECRAWL_API_KEY,
+          },
+          geminiApiKey,
+        );
+
+        if (geminiResult.success && geminiResult.audit) {
+          const audit = geminiResult.audit;
+          const grade = audit.grade;
+
+          // Gemini violations → 기존 응답 포맷 호환 + ai_reasoning 추가
+          const violations = audit.finalViolations.map((v) => ({
+            type: v.category,
+            status: v.confidence >= 0.8 ? 'likely' : 'possible',
+            severity: v.adjustedSeverity || v.severity,
+            matchedText: v.originalText,
+            context: v.context,
+            description: v.category,
+            legalBasis: v.patternId ? [{ article: v.patternId }] : [],
+            confidence: v.confidence,
+            patternId: v.patternId,
+            ai_reasoning: v.reasoning,
+            sectionType: v.sectionType,
+            fromImage: v.fromImage || false,
+            disclaimerPresent: v.disclaimerPresent || false,
+            source: v.source || 'gemini',
+          }));
+
+          const processingTimeMs = Date.now() - startTime;
+
+          // Supabase 저장 (best-effort)
+          let saved = false;
+          if (c.env.SUPABASE_URL && c.env.SUPABASE_ANON_KEY) {
+            const severities = violations.reduce(
+              (acc, v) => {
+                if (v.severity === 'critical') acc.critical++;
+                else if (v.severity === 'major' || v.severity === 'high') acc.major++;
+                else acc.minor++;
+                return acc;
+              },
+              { critical: 0, major: 0, minor: 0 },
+            );
+            const saveResult = await saveCheckViolationResult(
+              c.env.SUPABASE_URL, c.env.SUPABASE_ANON_KEY,
+              {
+                hospital_id: hospitalId ? String(hospitalId) : undefined,
+                hospital_name: hospitalName,
+                url: targetUrl,
+                grade: grade.grade,
+                clean_score: grade.cleanScore,
+                violation_count: violations.length,
+                critical_count: severities.critical,
+                major_count: severities.major,
+                minor_count: severities.minor,
+                violations,
+                analysis_mode: 'gemini',
+                processing_time_ms: processingTimeMs,
+              },
+            );
+            saved = saveResult.saved;
+          }
+
+          return c.json({
+            success: true,
+            data: {
+              analysisId: audit.id,
+              url: targetUrl,
+              hospitalId,
+              hospitalName,
+              inputLength: geminiResult.meta.textLength,
+              violationCount: violations.length,
+              violations,
+              score: {
+                cleanScore: grade.cleanScore,
+                grade: grade.grade,
+                violationCount: grade.violationCount,
+              },
+              grade: grade.grade,
+              gradeDescription: `${grade.grade} (${grade.cleanScore}점)`,
+              summary: `위반 ${audit.finalCount}건 (Gemini AI 분석)`,
+              recommendations: [],
+              grayZones: audit.grayZones,
+              auditIssues: audit.auditIssues,
+              geminiOriginalCount: audit.geminiOriginalCount,
+              auditDelta: audit.auditDelta,
+              analysisMode: 'gemini',
+              meta: {
+                fetchTimeMs: geminiResult.meta.fetchTimeMs,
+                geminiTimeMs: geminiResult.meta.geminiTimeMs,
+                auditTimeMs: geminiResult.meta.auditTimeMs,
+                crawlMethod: geminiResult.meta.crawlMethod,
+                crossIntel: geminiResult.meta.crossIntel,
+              },
+              processingTimeMs,
+              analyzedAt: geminiResult.meta.timestamp,
+              saved,
+            },
+          });
+        }
+
+        // Gemini 파이프라인 실패 → fallback으로 진행
+        console.warn(`[analyze-url] Gemini pipeline failed, falling back: ${geminiResult.error?.code} - ${geminiResult.error?.message}`);
+      } catch (geminiError: unknown) {
+        const errMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
+        console.warn(`[analyze-url] Gemini pipeline error, falling back: ${errMsg}`);
+      }
+    }
+
+    // ━━━━ Fallback: 기존 패턴 매칭 (GEMINI_API_KEY 없거나 Gemini 실패시) ━━━━
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
 
@@ -116,6 +241,40 @@ hospitalRoutes.post('/analyze-url', async (c) => {
     }
 
     const result = violationDetector.analyze({ text: textContent });
+    const fallbackProcessingTimeMs = Date.now() - startTime;
+
+    // Supabase 저장 (best-effort)
+    let saved = false;
+    if (c.env.SUPABASE_URL && c.env.SUPABASE_ANON_KEY) {
+      const vs = result.judgment.violations;
+      const severities = vs.reduce(
+        (acc: { critical: number; major: number; minor: number }, v: { severity: string }) => {
+          if (v.severity === 'critical' || v.severity === 'high') acc.critical++;
+          else if (v.severity === 'medium' || v.severity === 'major') acc.major++;
+          else acc.minor++;
+          return acc;
+        },
+        { critical: 0, major: 0, minor: 0 },
+      );
+      const saveResult = await saveCheckViolationResult(
+        c.env.SUPABASE_URL, c.env.SUPABASE_ANON_KEY,
+        {
+          hospital_id: hospitalId ? String(hospitalId) : undefined,
+          hospital_name: hospitalName,
+          url: targetUrl,
+          grade: result.judgment.score.grade,
+          clean_score: result.judgment.score.cleanScore ?? result.judgment.score.complianceRate ?? 0,
+          violation_count: vs.length,
+          critical_count: severities.critical,
+          major_count: severities.major,
+          minor_count: severities.minor,
+          violations: vs,
+          analysis_mode: 'pattern_only',
+          processing_time_ms: fallbackProcessingTimeMs,
+        },
+      );
+      saved = saveResult.saved;
+    }
 
     return c.json({
       success: true,
@@ -132,8 +291,10 @@ hospitalRoutes.post('/analyze-url', async (c) => {
         gradeDescription: result.judgment.score.gradeDescription,
         summary: result.judgment.summary,
         recommendations: result.judgment.recommendations,
-        processingTimeMs: Date.now() - startTime,
+        analysisMode: 'pattern_only',
+        processingTimeMs: fallbackProcessingTimeMs,
         analyzedAt: result.judgment.analyzedAt.toISOString(),
+        saved,
       },
     });
   } catch (error: unknown) {

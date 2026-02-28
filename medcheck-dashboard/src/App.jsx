@@ -1,7 +1,7 @@
-import MedCheckDashboard from './components/MedCheckDashboard'
+import MedCheckApp from './components/MedCheckApp'
 
 function App() {
-  return <MedCheckDashboard />
+  return <MedCheckApp />
 }
 
 export default App

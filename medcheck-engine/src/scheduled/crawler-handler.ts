@@ -14,8 +14,9 @@
  * 위치: src/scheduled/crawler-handler.ts
  */
 
-import { runAnalysisPipeline, savePipelineResult } from '../services/analysis-pipeline';
-import type { PipelineInput } from '../services/analysis-pipeline';
+import { runAnalysisPipeline, savePipelineResult, runGeminiPipeline } from '../services/analysis-pipeline';
+import type { PipelineInput, GeminiPipelineResult } from '../services/analysis-pipeline';
+import { saveCheckViolationResult } from '../services/supabase-saver';
 import type { Env } from '../types/env';
 
 // ============================================
@@ -23,7 +24,7 @@ import type { Env } from '../types/env';
 // ============================================
 
 /** 한 번의 Cron 실행에서 분석할 최대 병원 수 */
-const BATCH_SIZE = 10;
+const BATCH_SIZE = 5;
 
 /** 각 병원 분석 사이 대기 시간 (ms) - API 레이트 리밋 방지 */
 const DELAY_BETWEEN = 2000;
@@ -130,64 +131,163 @@ export async function handleScheduled(
         WHERE hospital_id = ?
       `).bind(hospital.hospital_id).run();
 
-      console.log(`[Crawler] [${i + 1}/${hospitals.length}] ${hospital.hospital_name}: ${hospital.homepage_url}`);
-
-      const input: PipelineInput = {
-        url: hospital.homepage_url,
-        hospitalId: hospital.hospital_id,
-        hospitalName: hospital.hospital_name,
-        enableAI: !!env.GEMINI_API_KEY, // API 키 있으면 AI 검증도 수행
-        batchId,
-        timeout: ANALYSIS_TIMEOUT,
-      };
+      const targetUrl = normalizeUrl(hospital.homepage_url);
+      console.log(`[Crawler] [${i + 1}/${hospitals.length}] ${hospital.hospital_name}: ${targetUrl}`);
 
       try {
-        // 분석 파이프라인 실행
-        const result = await runAnalysisPipeline(input, env.GEMINI_API_KEY);
+        // ━━━━ Gemini 파이프라인 우선 시도 ━━━━
+        let analysisMode = 'pattern_only';
+        let gradeStr = '-';
+        let cleanScore = 0;
+        let violationCount = 0;
+        let criticalCount = 0;
+        let majorCount = 0;
+        let minorCount = 0;
+        let violationsArr: unknown[] = [];
+        let analysisSuccess = false;
 
-        // 결과 DB 저장
-        await savePipelineResult(db, input, result);
+        if (env.GEMINI_API_KEY) {
+          try {
+            const geminiResult: GeminiPipelineResult = await runGeminiPipeline(
+              {
+                url: normalizeUrl(hospital.homepage_url),
+                hospitalId: String(hospital.hospital_id),
+                hospitalName: hospital.hospital_name,
+                db: env.DB,
+                supabaseUrl: env.SUPABASE_URL,
+                supabaseKey: env.SUPABASE_ANON_KEY,
+                firecrawlUrl: env.FIRECRAWL_URL,
+                firecrawlApiKey: env.FIRECRAWL_API_KEY,
+              },
+              env.GEMINI_API_KEY,
+            );
 
-        if (result.success && result.analysis) {
-          successCount++;
-          totalViolations += result.analysis.violationCount;
-          console.log(
-            `  → ${result.analysis.gradeEmoji} ${result.analysis.grade}등급 ` +
-            `(청정 ${result.analysis.cleanScore}점, 위반 ${result.analysis.violationCount}건)`
+            if (geminiResult.success && geminiResult.audit) {
+              const audit = geminiResult.audit;
+              const grade = audit.grade;
+              analysisMode = 'gemini';
+              gradeStr = grade.grade;
+              cleanScore = grade.cleanScore;
+              violationCount = audit.finalCount;
+
+              const violations = audit.finalViolations.map((v) => ({
+                type: v.category,
+                severity: v.adjustedSeverity || v.severity,
+                matchedText: v.originalText,
+                confidence: v.confidence,
+                patternId: v.patternId,
+                ai_reasoning: v.reasoning,
+                source: v.source || 'gemini',
+              }));
+              violationsArr = violations;
+
+              for (const v of violations) {
+                if (v.severity === 'critical') criticalCount++;
+                else if (v.severity === 'major' || v.severity === 'high') majorCount++;
+                else minorCount++;
+              }
+
+              analysisSuccess = true;
+              totalViolations += violationCount;
+              console.log(`  → ${gradeStr}등급 (청정 ${cleanScore}점, 위반 ${violationCount}건, gemini)`);
+            } else {
+              console.warn(`  → Gemini failed: ${geminiResult.error?.code}, falling back`);
+            }
+          } catch (geminiErr: unknown) {
+            console.warn(`  → Gemini exception: ${(geminiErr as Error).message}, falling back`);
+          }
+        }
+
+        // ━━━━ Fallback: 기존 패턴 매칭 파이프라인 ━━━━
+        if (!analysisSuccess) {
+          const input: PipelineInput = {
+            url: normalizeUrl(hospital.homepage_url),
+            hospitalId: hospital.hospital_id,
+            hospitalName: hospital.hospital_name,
+            enableAI: false,
+            batchId,
+            timeout: ANALYSIS_TIMEOUT,
+          };
+
+          const result = await runAnalysisPipeline(input, undefined);
+          await savePipelineResult(db, input, result);
+
+          if (result.success && result.analysis) {
+            analysisMode = 'pattern_only';
+            gradeStr = result.analysis.grade;
+            cleanScore = result.analysis.cleanScore;
+            violationCount = result.analysis.violationCount;
+            criticalCount = result.analysis.criticalCount;
+            majorCount = result.analysis.majorCount;
+            minorCount = result.analysis.minorCount;
+            violationsArr = result.analysis.violations;
+            analysisSuccess = true;
+            totalViolations += violationCount;
+            console.log(
+              `  → ${result.analysis.gradeEmoji} ${gradeStr}등급 ` +
+              `(청정 ${cleanScore}점, 위반 ${violationCount}건, pattern)`
+            );
+          } else if (result.error?.code === 'SPA_SITE') {
+            skipCount++;
+            console.log(`  → SPA skip: ${hospital.hospital_name}`);
+            await db.prepare(`
+              UPDATE crawl_queue SET status = 'skipped',
+              error_message = 'SPA site', updated_at = datetime('now')
+              WHERE hospital_id = ?
+            `).bind(hospital.hospital_id).run();
+          } else {
+            failCount++;
+            console.log(`  → 실패: ${result.error?.message}`);
+          }
+        }
+
+        // ━━━━ Supabase check_violation_results 저장 (best-effort) ━━━━
+        if (analysisSuccess && env.SUPABASE_URL && env.SUPABASE_ANON_KEY) {
+          const processingTimeMs = Date.now() - startTime;
+          await saveCheckViolationResult(
+            env.SUPABASE_URL, env.SUPABASE_ANON_KEY,
+            {
+              hospital_id: String(hospital.hospital_id),
+              hospital_name: hospital.hospital_name,
+              url: normalizeUrl(hospital.homepage_url),
+              grade: gradeStr,
+              clean_score: cleanScore,
+              violation_count: violationCount,
+              critical_count: criticalCount,
+              major_count: majorCount,
+              minor_count: minorCount,
+              violations: violationsArr,
+              analysis_mode: analysisMode,
+              processing_time_ms: processingTimeMs,
+            },
           );
-        } else if (result.error?.code === 'SPA_SITE') {
-          skipCount++;
-          console.log(`  → ⏭️ SPA skip: ${hospital.hospital_name}`);
+        }
+
+        // crawl_queue 상태 업데이트
+        if (analysisSuccess) {
+          successCount++;
           await db.prepare(`
-            UPDATE crawl_queue SET status = 'skipped',
-            error_message = 'SPA site', updated_at = datetime('now')
+            UPDATE crawl_queue
+            SET status = 'completed',
+                last_analyzed_at = datetime('now'),
+                next_analyze_after = datetime('now', '+${REANALYZE_INTERVAL_DAYS} days'),
+                updated_at = datetime('now')
             WHERE hospital_id = ?
           `).bind(hospital.hospital_id).run();
-        } else {
-          failCount++;
-          console.log(`  → ❌ 실패: ${result.error?.message}`);
         }
 
       } catch (error) {
         failCount++;
-        console.error(`  → ❌ 예외: ${(error as Error).message}`);
+        console.error(`  → 예외: ${(error as Error).message}`);
 
-        // 에러 결과 저장
-        await savePipelineResult(db, input, {
-          success: false,
-          meta: {
-            url: input.url,
-            hospitalId: input.hospitalId,
-            textLength: 0,
-            analysisTimeMs: 0,
-            fetchTimeMs: 0,
-            timestamp: new Date().toISOString(),
-          },
-          error: {
-            code: 'EXCEPTION',
-            message: (error as Error).message,
-          },
-        });
+        await db.prepare(`
+          UPDATE crawl_queue
+          SET status = 'pending',
+              retry_count = retry_count + 1,
+              error_message = ?,
+              updated_at = datetime('now')
+          WHERE hospital_id = ?
+        `).bind((error as Error).message, hospital.hospital_id).run();
       }
 
       // 다음 병원 전에 잠시 대기 (레이트 리밋 방지)
@@ -279,26 +379,116 @@ export async function handleManualTriggers(env: Env): Promise<void> {
       FROM crawl_queue
       WHERE status IN ('pending')
       ORDER BY priority ASC
-      LIMIT 10
+      LIMIT ${BATCH_SIZE}
     `).all();
 
     let successCount = 0;
     const startTime = Date.now();
 
     for (const hospital of (hospitals.results || []) as any[]) {
-      const input: PipelineInput = {
-        url: hospital.homepage_url,
-        hospitalId: hospital.hospital_id,
-        hospitalName: hospital.hospital_name,
-        enableAI: trigger.enable_ai === 1 && !!env.GEMINI_API_KEY,
-        batchId,
-        timeout: ANALYSIS_TIMEOUT,
-      };
-
       try {
-        const result = await runAnalysisPipeline(input, env.GEMINI_API_KEY);
-        await savePipelineResult(db, input, result);
-        if (result.success) successCount++;
+        let analysisSuccess = false;
+        let analysisMode = 'pattern_only';
+        let gradeStr = '-';
+        let cleanScore = 0;
+        let violationCount = 0;
+        let violationsArr: unknown[] = [];
+        let criticalCount = 0;
+        let majorCount = 0;
+        let minorCount = 0;
+
+        // Gemini 우선
+        if (trigger.enable_ai === 1 && env.GEMINI_API_KEY) {
+          try {
+            const geminiResult: GeminiPipelineResult = await runGeminiPipeline(
+              {
+                url: normalizeUrl(hospital.homepage_url),
+                hospitalId: String(hospital.hospital_id),
+                hospitalName: hospital.hospital_name,
+                db: env.DB,
+                supabaseUrl: env.SUPABASE_URL,
+                supabaseKey: env.SUPABASE_ANON_KEY,
+                firecrawlUrl: env.FIRECRAWL_URL,
+                firecrawlApiKey: env.FIRECRAWL_API_KEY,
+              },
+              env.GEMINI_API_KEY,
+            );
+
+            if (geminiResult.success && geminiResult.audit) {
+              const audit = geminiResult.audit;
+              analysisMode = 'gemini';
+              gradeStr = audit.grade.grade;
+              cleanScore = audit.grade.cleanScore;
+              violationCount = audit.finalCount;
+              violationsArr = audit.finalViolations.map((v) => ({
+                type: v.category,
+                severity: v.adjustedSeverity || v.severity,
+                matchedText: v.originalText,
+                confidence: v.confidence,
+                patternId: v.patternId,
+                ai_reasoning: v.reasoning,
+                source: v.source || 'gemini',
+              }));
+              for (const v of violationsArr as any[]) {
+                if (v.severity === 'critical') criticalCount++;
+                else if (v.severity === 'major' || v.severity === 'high') majorCount++;
+                else minorCount++;
+              }
+              analysisSuccess = true;
+            }
+          } catch (geminiErr: unknown) {
+            console.warn(`[ManualTrigger] Gemini error: ${(geminiErr as Error).message}`);
+          }
+        }
+
+        // Fallback
+        if (!analysisSuccess) {
+          const input: PipelineInput = {
+            url: normalizeUrl(hospital.homepage_url),
+            hospitalId: hospital.hospital_id,
+            hospitalName: hospital.hospital_name,
+            enableAI: false,
+            batchId,
+            timeout: ANALYSIS_TIMEOUT,
+          };
+          const result = await runAnalysisPipeline(input, undefined);
+          await savePipelineResult(db, input, result);
+          if (result.success && result.analysis) {
+            analysisMode = 'pattern_only';
+            gradeStr = result.analysis.grade;
+            cleanScore = result.analysis.cleanScore;
+            violationCount = result.analysis.violationCount;
+            criticalCount = result.analysis.criticalCount;
+            majorCount = result.analysis.majorCount;
+            minorCount = result.analysis.minorCount;
+            violationsArr = result.analysis.violations;
+            analysisSuccess = true;
+          }
+        }
+
+        if (analysisSuccess) {
+          successCount++;
+          // Supabase 저장
+          if (env.SUPABASE_URL && env.SUPABASE_ANON_KEY) {
+            await saveCheckViolationResult(
+              env.SUPABASE_URL, env.SUPABASE_ANON_KEY,
+              {
+                hospital_id: String(hospital.hospital_id),
+                hospital_name: hospital.hospital_name,
+                url: normalizeUrl(hospital.homepage_url),
+                grade: gradeStr,
+                clean_score: cleanScore,
+                violation_count: violationCount,
+                critical_count: criticalCount,
+                major_count: majorCount,
+                minor_count: minorCount,
+                violations: violationsArr,
+                analysis_mode: analysisMode,
+                processing_time_ms: Date.now() - startTime,
+              },
+            );
+          }
+        }
       } catch (e) {
         console.error(`[ManualTrigger] Error: ${(e as Error).message}`);
       }
@@ -326,6 +516,15 @@ export async function handleManualTriggers(env: Env): Promise<void> {
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+/** URL 정규화: 프로토콜 없으면 추가, http→https 시도 */
+function normalizeUrl(raw: string): string {
+  let url = raw.trim();
+  if (!/^https?:\/\//i.test(url)) {
+    url = 'https://' + url;
+  }
+  return url;
 }
 
 async function completeBatch(

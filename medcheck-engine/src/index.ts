@@ -75,12 +75,90 @@ app.get('/', (c) => {
   });
 });
 
-app.get('/v1/health', (c) => {
+app.get('/v1/health', async (c) => {
+  const db = c.env.DB;
+  const detailed = c.req.query('detailed') === 'true';
+  const components: Array<{ name: string; status: string; latency?: number; message?: string }> = [];
+
+  // 1. Engine
+  components.push({ name: 'engine', status: 'healthy', message: 'Running' });
+
+  // 2. D1 Database
+  const dbStart = Date.now();
+  try {
+    await db.prepare('SELECT 1').first();
+    const dbLatency = Date.now() - dbStart;
+    components.push({
+      name: 'd1_database',
+      status: dbLatency > 1000 ? 'degraded' : 'healthy',
+      latency: dbLatency,
+      message: `Connected (${dbLatency}ms)`,
+    });
+  } catch (e) {
+    components.push({ name: 'd1_database', status: 'unhealthy', latency: Date.now() - dbStart, message: (e as Error).message });
+  }
+
+  // 3. Supabase
+  if (c.env.SUPABASE_URL && c.env.SUPABASE_ANON_KEY) {
+    const sbStart = Date.now();
+    try {
+      const res = await fetch(`${c.env.SUPABASE_URL}/rest/v1/`, {
+        headers: { apikey: c.env.SUPABASE_ANON_KEY },
+        signal: AbortSignal.timeout(3000),
+      });
+      const sbLatency = Date.now() - sbStart;
+      components.push({
+        name: 'supabase',
+        status: res.ok ? (sbLatency > 2000 ? 'degraded' : 'healthy') : 'unhealthy',
+        latency: sbLatency,
+        message: res.ok ? `Connected (${sbLatency}ms)` : `HTTP ${res.status}`,
+      });
+    } catch (e) {
+      components.push({ name: 'supabase', status: 'degraded', latency: Date.now() - sbStart, message: (e as Error).message?.substring(0, 80) });
+    }
+  }
+
+  // 4. Gemini API (check key exists)
+  components.push({
+    name: 'gemini',
+    status: c.env.GEMINI_API_KEY ? 'healthy' : 'unhealthy',
+    message: c.env.GEMINI_API_KEY ? 'API key configured' : 'API key missing',
+  });
+
+  // Analysis stats (detailed mode)
+  let analysisStats;
+  if (detailed) {
+    try {
+      const today = new Date().toISOString().split('T')[0];
+      const stats = await db.prepare(`
+        SELECT
+          COUNT(*) as total_today,
+          SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as success,
+          AVG(processing_time_ms) as avg_time
+        FROM analysis_history
+        WHERE DATE(analyzed_at) = ?
+      `).bind(today).first() as any;
+      analysisStats = {
+        totalToday: stats?.total_today || 0,
+        successRate: stats?.total_today > 0 ? Math.round((stats.success / stats.total_today) * 100) : 100,
+        avgProcessingTimeMs: Math.round(stats?.avg_time || 0),
+      };
+    } catch {
+      analysisStats = { totalToday: 0, successRate: 100, avgProcessingTimeMs: 0 };
+    }
+  }
+
+  const hasUnhealthy = components.some(c => c.status === 'unhealthy');
+  const hasDegraded = components.some(c => c.status === 'degraded');
+  const overall = hasUnhealthy ? 'unhealthy' : hasDegraded ? 'degraded' : 'healthy';
+
   return c.json({
-    status: 'healthy',
+    status: overall,
     timestamp: new Date().toISOString(),
     version: '2.0.0',
     cronEnabled: true,
+    components,
+    ...(detailed && analysisStats ? { analysisStats } : {}),
   });
 });
 

@@ -323,4 +323,153 @@ pricingRoutes.get('/prices/compare/:procedureId', async (c) => {
   }
 });
 
+// ============================================
+// 가격 분석 API (Phase 3)
+// ============================================
+
+// 지역별 가격 통계
+pricingRoutes.get('/prices/analytics/by-region', async (c) => {
+  try {
+    const procedureId = c.req.query('procedureId');
+    let query = `
+      SELECT
+        h.region,
+        COUNT(*) as record_count,
+        AVG(pr.price) as avg_price,
+        MIN(pr.price) as min_price,
+        MAX(pr.price) as max_price,
+        COUNT(DISTINCT pr.hospital_id) as hospital_count
+      FROM price_records_v2 pr
+      JOIN hospitals h ON pr.hospital_id = h.id
+      WHERE h.region IS NOT NULL
+    `;
+    const params: string[] = [];
+    if (procedureId) { query += ' AND pr.procedure_id = ?'; params.push(procedureId); }
+    query += ' GROUP BY h.region ORDER BY avg_price ASC';
+
+    const results = await c.env.DB.prepare(query).bind(...params).all();
+    return c.json({ success: true, data: results.results || [] });
+  } catch (e: unknown) {
+    return handleApiError(c, e);
+  }
+});
+
+// 시술별 가격 분포
+pricingRoutes.get('/prices/analytics/distribution', async (c) => {
+  try {
+    const procedureId = c.req.query('procedureId');
+    if (!procedureId) return c.json({ success: false, error: 'procedureId required' }, 400);
+
+    const results = await c.env.DB.prepare(`
+      SELECT
+        pr.price,
+        pr.price_per_shot,
+        pr.target_area_code,
+        pr.shot_count,
+        h.name as hospital_name,
+        h.region
+      FROM price_records_v2 pr
+      JOIN hospitals h ON pr.hospital_id = h.id
+      WHERE pr.procedure_id = ?
+      ORDER BY pr.price ASC
+    `).bind(procedureId).all();
+
+    const prices = (results.results || []) as Array<Record<string, unknown>>;
+    const priceValues = prices.map(p => p.price as number).filter(Boolean);
+
+    const stats = priceValues.length > 0 ? {
+      count: priceValues.length,
+      avg: Math.round(priceValues.reduce((a, b) => a + b, 0) / priceValues.length),
+      median: priceValues[Math.floor(priceValues.length / 2)],
+      min: Math.min(...priceValues),
+      max: Math.max(...priceValues),
+      stddev: Math.round(Math.sqrt(priceValues.reduce((sum, v) => {
+        const avg = priceValues.reduce((a, b) => a + b, 0) / priceValues.length;
+        return sum + Math.pow(v - avg, 2);
+      }, 0) / priceValues.length)),
+    } : null;
+
+    return c.json({ success: true, data: { records: results.results, stats } });
+  } catch (e: unknown) {
+    return handleApiError(c, e);
+  }
+});
+
+// 가격 변동 이력
+pricingRoutes.get('/prices/analytics/trends', async (c) => {
+  try {
+    const procedureId = c.req.query('procedureId');
+    const hospitalId = c.req.query('hospitalId');
+    const limit = parseInt(c.req.query('limit') || '50');
+
+    let query = 'SELECT * FROM price_history WHERE 1=1';
+    const params: (string | number)[] = [];
+    if (procedureId) { query += ' AND procedure_id = ?'; params.push(procedureId); }
+    if (hospitalId) { query += ' AND hospital_id = ?'; params.push(hospitalId); }
+    query += ' ORDER BY detected_at DESC LIMIT ?';
+    params.push(limit);
+
+    const results = await c.env.DB.prepare(query).bind(...params).all();
+    return c.json({ success: true, data: results.results || [] });
+  } catch (e: unknown) {
+    return handleApiError(c, e);
+  }
+});
+
+// 병원별 가격 랭킹
+pricingRoutes.get('/prices/analytics/ranking', async (c) => {
+  try {
+    const procedureId = c.req.query('procedureId');
+    if (!procedureId) return c.json({ success: false, error: 'procedureId required' }, 400);
+    const targetArea = c.req.query('targetArea');
+
+    let query = `
+      SELECT
+        pr.hospital_id,
+        h.name as hospital_name,
+        h.region,
+        pr.price,
+        pr.price_per_shot,
+        pr.shot_count,
+        pr.target_area_code
+      FROM price_records_v2 pr
+      JOIN hospitals h ON pr.hospital_id = h.id
+      WHERE pr.procedure_id = ?
+    `;
+    const params: string[] = [procedureId];
+    if (targetArea) { query += ' AND pr.target_area_code = ?'; params.push(targetArea); }
+    query += ' ORDER BY pr.price ASC';
+
+    const results = await c.env.DB.prepare(query).bind(...params).all();
+    return c.json({ success: true, data: results.results || [] });
+  } catch (e: unknown) {
+    return handleApiError(c, e);
+  }
+});
+
+// 전체 가격 요약 (대시보드용)
+pricingRoutes.get('/prices/analytics/summary', async (c) => {
+  try {
+    const db = c.env.DB;
+    const [records, procedures, alerts, mappings] = await Promise.all([
+      db.prepare('SELECT COUNT(*) as cnt FROM price_records_v2').first() as Promise<any>,
+      db.prepare('SELECT COUNT(DISTINCT procedure_id) as cnt FROM price_records_v2').first() as Promise<any>,
+      db.prepare('SELECT COUNT(*) as cnt FROM price_change_alerts WHERE is_read = 0').first() as Promise<any>,
+      db.prepare("SELECT COUNT(*) as cnt FROM mapping_candidates WHERE status = 'pending_review' OR status = 'collecting'").first() as Promise<any>,
+    ]);
+
+    return c.json({
+      success: true,
+      data: {
+        totalRecords: records?.cnt || 0,
+        totalProcedures: procedures?.cnt || 0,
+        unreadAlerts: alerts?.cnt || 0,
+        pendingMappings: mappings?.cnt || 0,
+      },
+    });
+  } catch (e: unknown) {
+    return handleApiError(c, e);
+  }
+});
+
 export { pricingRoutes };

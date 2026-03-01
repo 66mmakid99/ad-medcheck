@@ -7,6 +7,8 @@ import HospitalsTab from './tabs/HospitalsTab';
 import ReportsTab from './tabs/ReportsTab';
 import CrawlerTab from './tabs/CrawlerTab';
 import FalsePositiveTab from './tabs/FalsePositiveTab';
+import HitlQueueTab from './tabs/HitlQueueTab';
+import LearningTab from './tabs/LearningTab';
 import SettingsTab from './tabs/SettingsTab';
 
 const TAB_COMPONENTS = {
@@ -17,6 +19,8 @@ const TAB_COMPONENTS = {
   reports: ReportsTab,
   crawler: CrawlerTab,
   'false-positives': FalsePositiveTab,
+  'hitl-queue': HitlQueueTab,
+  learning: LearningTab,
   settings: SettingsTab,
 };
 

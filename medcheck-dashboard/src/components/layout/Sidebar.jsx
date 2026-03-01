@@ -8,6 +8,8 @@ const MENU_ITEMS = [
   { id: 'reports', label: '리포트', icon: '📋' },
   { id: 'crawler', label: '크롤러', icon: '🤖' },
   { id: 'false-positives', label: '오탐 관리', icon: '🔄' },
+  { id: 'hitl-queue', label: 'HITL 검토', icon: '👁️' },
+  { id: 'learning', label: 'Flywheel 학습', icon: '🔄' },
 ];
 
 const BOTTOM_ITEMS = [

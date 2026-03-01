@@ -9,6 +9,13 @@ import CrawlerTab from './tabs/CrawlerTab';
 import FalsePositiveTab from './tabs/FalsePositiveTab';
 import HitlQueueTab from './tabs/HitlQueueTab';
 import LearningTab from './tabs/LearningTab';
+import PerformanceTab from './tabs/PerformanceTab';
+import HistoryTab from './tabs/HistoryTab';
+import OcrTab from './tabs/OcrTab';
+import PricingTab from './tabs/PricingTab';
+import PriceAlertsTab from './tabs/PriceAlertsTab';
+import MappingTab from './tabs/MappingTab';
+import PriceAnalyticsTab from './tabs/PriceAnalyticsTab';
 import SettingsTab from './tabs/SettingsTab';
 
 const TAB_COMPONENTS = {
@@ -21,6 +28,13 @@ const TAB_COMPONENTS = {
   'false-positives': FalsePositiveTab,
   'hitl-queue': HitlQueueTab,
   learning: LearningTab,
+  performance: PerformanceTab,
+  history: HistoryTab,
+  ocr: OcrTab,
+  pricing: PricingTab,
+  'price-alerts': PriceAlertsTab,
+  mapping: MappingTab,
+  'price-analytics': PriceAnalyticsTab,
   settings: SettingsTab,
 };
 
@@ -39,7 +53,6 @@ class TabErrorBoundary extends Component {
   }
 
   componentDidUpdate(prevProps) {
-    // 탭 전환 시 에러 상태 초기화
     if (prevProps.activeTab !== this.props.activeTab) {
       this.setState({ error: null });
     }

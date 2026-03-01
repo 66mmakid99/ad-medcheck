@@ -455,6 +455,35 @@ export class AutoLearner {
     };
   }
 
+  /**
+   * 전체 패턴 신뢰도 일괄 조정 (Cron에서 호출)
+   */
+  async adjustAllPatternConfidence(): Promise<{ adjusted: number; skipped: number }> {
+    // 피드백이 10건 이상인 패턴 목록 조회
+    const patterns = await this.db
+      .prepare(`
+        SELECT pattern_id, COUNT(*) as cnt
+        FROM analysis_feedback_v2
+        GROUP BY pattern_id
+        HAVING cnt >= 10
+      `)
+      .all();
+
+    let adjusted = 0;
+    let skipped = 0;
+
+    for (const row of (patterns.results || []) as any[]) {
+      const result = await this.adjustPatternConfidence(row.pattern_id);
+      if (result) {
+        adjusted++;
+      } else {
+        skipped++;
+      }
+    }
+
+    return { adjusted, skipped };
+  }
+
   // ============================================
   // 새 패턴 후보 추출 (미탐 분석)
   // ============================================

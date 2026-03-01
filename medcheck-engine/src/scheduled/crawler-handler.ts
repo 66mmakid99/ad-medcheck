@@ -20,6 +20,7 @@
 import { runAnalysisPipeline, savePipelineResult, runGeminiPipeline } from '../services/analysis-pipeline';
 import type { PipelineInput, GeminiPipelineResult } from '../services/analysis-pipeline';
 import { saveCheckViolationResult } from '../services/supabase-saver';
+import { createAutoLearner } from '../services/auto-learner';
 import type { Env } from '../types/env';
 
 // ============================================
@@ -330,9 +331,36 @@ export async function handleScheduled(
     ).run();
   }
 
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // Step 4: Flywheel 자동 학습 적용 (Phase 2)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  try {
+    const learner = createAutoLearner(db);
+
+    // 4-1: 예외 후보 생성 (false_positive 피드백 기반)
+    const exceptions = await learner.generateExceptionCandidates();
+    if (exceptions.generated > 0) {
+      console.log(`[Flywheel] 예외 후보 ${exceptions.generated}건 생성`);
+    }
+
+    // 4-2: 패턴 신뢰도 일괄 조정
+    const confidence = await learner.adjustAllPatternConfidence();
+    if (confidence.adjusted > 0) {
+      console.log(`[Flywheel] 신뢰도 조정 ${confidence.adjusted}건`);
+    }
+
+    // 4-3: 자동 적용 가능한 학습 결과 일괄 적용
+    const autoResult = await learner.autoApplyEligible();
+    if (autoResult.applied > 0) {
+      console.log(`[Flywheel] 자동 적용 ${autoResult.applied}/${autoResult.total}건 (스킵 ${autoResult.skipped}건)`);
+    }
+  } catch (flywheelError) {
+    console.error(`[Flywheel] 자동 학습 실패 (non-blocking): ${(flywheelError as Error).message}`);
+  }
+
   // 스케줄러 상태 업데이트
   await db.prepare(`
-    UPDATE crawler_scheduler_status 
+    UPDATE crawler_scheduler_status
     SET running_jobs = 0,
         last_heartbeat = datetime('now')
     WHERE id = 'singleton'

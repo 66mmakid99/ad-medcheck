@@ -90,6 +90,30 @@ export default function ViolationsTab() {
         >
           🔄 새로고침
         </button>
+        <button
+          onClick={() => {
+            const BOM = '\uFEFF';
+            const headers = ['병원명','URL','등급','청정지수','위반수','Critical','Major','Minor','분석모드','분석시간'];
+            const csvRows = [headers.join(',')];
+            for (const r of rows) {
+              csvRows.push([
+                r.hospital_name || '', r.url || '', r.grade || '', r.clean_score ?? '',
+                r.violation_count || 0, r.critical_count || 0, r.major_count || 0, r.minor_count || 0,
+                r.analysis_mode || '', r.analyzed_at || '',
+              ].map(f => `"${String(f).replace(/"/g, "'")}"`).join(','));
+            }
+            const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `violations-${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+          }}
+          disabled={rows.length === 0}
+          className="px-3 py-2 bg-surface border border-border text-text-secondary rounded-lg text-sm font-medium hover:bg-border transition-colors disabled:opacity-30"
+        >
+          CSV 다운로드
+        </button>
       </div>
 
       <div className="grid grid-cols-5 gap-5">

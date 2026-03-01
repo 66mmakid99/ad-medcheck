@@ -268,6 +268,33 @@ export default function AnalyzeTab() {
                   <p className="text-xs text-text-secondary leading-relaxed">{result.summary}</p>
                 </div>
               )}
+
+              {/* CSV 다운로드 */}
+              {result.violations?.length > 0 && (
+                <button
+                  onClick={() => {
+                    const BOM = '\uFEFF';
+                    const headers = ['심각도','설명','매칭텍스트','판정','신뢰도','법적근거'];
+                    const csvRows = [headers.join(',')];
+                    for (const v of result.violations) {
+                      csvRows.push([
+                        v.severity || '', safe(v.description), safe(v.matchedText),
+                        v.determination || '', v.compositeConfidence != null ? Math.round(v.compositeConfidence * 100) + '%' : '',
+                        formatLegalBasis(v.legalBasis),
+                      ].map(f => `"${String(f).replace(/"/g, "'")}"`).join(','));
+                    }
+                    const blob = new Blob([BOM + csvRows.join('\n')], { type: 'text/csv;charset=utf-8' });
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `analyze-result-${new Date().toISOString().split('T')[0]}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                  }}
+                  className="w-full mt-3 px-3 py-2 bg-surface border border-border text-text-secondary rounded-lg text-xs font-medium hover:bg-border transition-colors"
+                >
+                  CSV 다운로드
+                </button>
+              )}
             </div>
           ) : result?.error ? (
             <div className="text-center py-8">

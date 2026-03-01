@@ -856,4 +856,242 @@ analyzeRoutes.get('/price-rules', (c) => {
   });
 });
 
+// ============================================
+// AI 정확도 검증 테스트
+// ============================================
+
+/**
+ * 테스트 케이스: 실제 의료광고 표현 (정답 라벨 포함)
+ */
+const ACCURACY_TEST_CASES: Array<{
+  id: string;
+  text: string;
+  expectedViolation: boolean;
+  expectedCategory?: string;
+  expectedSeverity?: string;
+  description: string;
+}> = [
+  // === True Positives (위반이어야 함) ===
+  { id: 'TP-01', text: '본원은 100% 완치를 보장합니다.', expectedViolation: true, expectedCategory: '치료효과보장', expectedSeverity: 'critical', description: '100% 완치 보장 표현' },
+  { id: 'TP-02', text: '수술 후 부작용은 전혀 없습니다.', expectedViolation: true, expectedCategory: '부작용부정', expectedSeverity: 'critical', description: '부작용 완전 부정' },
+  { id: 'TP-03', text: '국내 최초! 최고의 기술력으로 시술합니다.', expectedViolation: true, expectedCategory: '최상급표현', expectedSeverity: 'major', description: '최초/최고 표현' },
+  { id: 'TP-04', text: '타 병원보다 50% 이상 효과적인 치료법', expectedViolation: true, expectedCategory: '비교광고', expectedSeverity: 'major', description: '타 병원 비교' },
+  { id: 'TP-05', text: '지금 예약하시면 시술비 무료! 선착순 10명', expectedViolation: true, expectedCategory: '환자유인', expectedSeverity: 'major', description: '무료 시술 환자유인' },
+  { id: 'TP-06', text: '수술 전후 사진을 보시면 효과를 확인하실 수 있습니다.', expectedViolation: true, expectedCategory: '치료경험담', description: '전후 사진 유도' },
+  { id: 'TP-07', text: '영구적인 효과로 재수술이 필요 없습니다.', expectedViolation: true, expectedCategory: '치료효과보장', expectedSeverity: 'critical', description: '영구적 효과 + 재수술 불필요' },
+  { id: 'TP-08', text: '연예인 OOO도 다녀간 병원', expectedViolation: true, expectedCategory: '환자유인', description: '유명인 이용 광고' },
+  { id: 'TP-09', text: '이 시술은 통증이 전혀 없어 마취 없이도 가능합니다.', expectedViolation: true, expectedCategory: '부작용부정', description: '무통 단정' },
+  { id: 'TP-10', text: '1회 시술만으로 확실한 효과를 보장합니다.', expectedViolation: true, expectedCategory: '치료효과보장', description: '1회 효과 보장' },
+  { id: 'TP-11', text: '이번 달 한정 50% 할인 이벤트 진행중! 놓치지 마세요.', expectedViolation: true, expectedCategory: '환자유인', description: '한정 할인 이벤트' },
+  { id: 'TP-12', text: '만족도 100%! 5000명의 환자가 선택한 시술', expectedViolation: true, expectedCategory: '치료효과보장', description: '만족도 100% 표현' },
+
+  // === True Negatives (위반 아니어야 함) ===
+  { id: 'TN-01', text: '본원은 서울특별시 강남구에 위치하고 있습니다.', expectedViolation: false, description: '단순 위치 정보' },
+  { id: 'TN-02', text: '진료 시간: 월~금 09:00~18:00, 토 09:00~13:00', expectedViolation: false, description: '진료 시간 안내' },
+  { id: 'TN-03', text: '해당 시술은 개인에 따라 효과가 다를 수 있습니다.', expectedViolation: false, description: '효과 차이 면책 고지' },
+  { id: 'TN-04', text: '의료진 소개: 김OO 원장 - 대한피부과학회 정회원', expectedViolation: false, description: '의료진 자격 소개' },
+  { id: 'TN-05', text: '100% 소독된 장비를 사용합니다.', expectedViolation: false, description: '100% 소독 (예외 표현)' },
+  { id: 'TN-06', text: '시술 후 붓기, 멍 등 일시적인 부작용이 있을 수 있습니다.', expectedViolation: false, description: '부작용 고지 (적법)' },
+  { id: 'TN-07', text: '건강보험심사평가원 평가 1등급 병원', expectedViolation: false, description: '공인기관 평가 결과' },
+  { id: 'TN-08', text: '예약 문의는 전화 02-1234-5678로 연락주세요.', expectedViolation: false, description: '연락처 안내' },
+
+  // === Edge Cases (경계선) ===
+  { id: 'EC-01', text: '높은 만족도를 자랑하는 시술입니다.', expectedViolation: true, description: '애매한 만족도 주장' },
+  { id: 'EC-02', text: '검증된 안전한 시술 방법입니다.', expectedViolation: false, description: '검증 표현 (경계선)' },
+  { id: 'EC-03', text: '빠른 회복이 가능한 최신 장비를 도입하였습니다.', expectedViolation: false, description: '빠른 회복 (장비 문맥)' },
+];
+
+/**
+ * POST /v1/analyze/accuracy-test - 정확도 검증 테스트
+ * Pattern-only vs Hybrid 비교, 내장 테스트 케이스 + 사용자 커스텀 지원
+ */
+analyzeRoutes.post('/accuracy-test', async (c) => {
+  const body = await c.req.json<{
+    includeBuiltin?: boolean;
+    customCases?: Array<{ id: string; text: string; expectedViolation: boolean; description?: string }>;
+    enableAI?: boolean;
+    aiProvider?: 'claude' | 'gemini';
+  }>().catch(() => ({}));
+
+  const includeBuiltin = body.includeBuiltin !== false;
+  const enableAI = body.enableAI ?? false;
+  const provider = body.aiProvider || 'gemini';
+
+  // 테스트 케이스 구성
+  const cases = [
+    ...(includeBuiltin ? ACCURACY_TEST_CASES : []),
+    ...(body.customCases || []).map(c => ({ ...c, expectedCategory: undefined, expectedSeverity: undefined, description: c.description || '' })),
+  ];
+
+  if (cases.length === 0) {
+    return c.json({ success: false, error: { code: 'NO_CASES', message: '테스트 케이스가 없습니다.' } }, 400);
+  }
+
+  const startTime = Date.now();
+
+  // Pattern-only 분석
+  const patternResults: Array<{
+    id: string;
+    text: string;
+    expected: boolean;
+    patternDetected: boolean;
+    patternCorrect: boolean;
+    violationCount: number;
+    grade: string;
+    confidence: number;
+    matchedCategories: string[];
+  }> = [];
+
+  for (const tc of cases) {
+    const result = violationDetector.analyze({
+      text: tc.text,
+      enableExtendedAnalysis: false,
+    });
+    const detected = result.judgment.violations.length > 0;
+    const matchedCategories = [...new Set(result.matches.map(m => m.category))];
+    const maxConfidence = result.matches.length > 0
+      ? Math.max(...result.matches.map(m => m.confidence))
+      : 0;
+
+    patternResults.push({
+      id: tc.id,
+      text: tc.text,
+      expected: tc.expectedViolation,
+      patternDetected: detected,
+      patternCorrect: detected === tc.expectedViolation,
+      violationCount: result.judgment.violations.length,
+      grade: result.judgment.score.grade,
+      confidence: maxConfidence,
+      matchedCategories,
+    });
+  }
+
+  // Hybrid (AI) 분석 (옵션)
+  let hybridResults: typeof patternResults | null = null;
+  let aiStats = { enabled: false, provider: '', callsMade: 0, processingTimeMs: 0 };
+
+  if (enableAI) {
+    const apiKey = provider === 'claude' ? c.env.CLAUDE_API_KEY : c.env.GEMINI_API_KEY;
+    if (apiKey) {
+      hybridResults = [];
+      const aiStart = Date.now();
+      let aiCalls = 0;
+
+      contextAnalyzer.configure({
+        provider,
+        apiKey,
+        confidenceThreshold: 0.7,
+        maxAIAnalysis: 5,
+      });
+
+      for (const tc of cases) {
+        const patternResult = violationDetector.analyze({
+          text: tc.text,
+          enableExtendedAnalysis: false,
+        });
+
+        try {
+          const aiResult = await contextAnalyzer.analyze(tc.text, patternResult.matches);
+          aiCalls += aiResult.aiCallCount;
+
+          const allViolations = [...patternResult.judgment.violations, ...aiResult.additionalViolations];
+          const detected = allViolations.length > 0;
+          const matchedCategories = [...new Set(patternResult.matches.map(m => m.category))];
+
+          hybridResults.push({
+            id: tc.id,
+            text: tc.text,
+            expected: tc.expectedViolation,
+            patternDetected: detected,
+            patternCorrect: detected === tc.expectedViolation,
+            violationCount: allViolations.length,
+            grade: patternResult.judgment.score.grade,
+            confidence: patternResult.matches.length > 0
+              ? Math.max(...patternResult.matches.map(m => m.confidence))
+              : 0,
+            matchedCategories,
+          });
+        } catch {
+          // AI 실패 시 pattern 결과 사용
+          hybridResults.push(patternResults.find(r => r.id === tc.id)!);
+        }
+      }
+
+      aiStats = { enabled: true, provider, callsMade: aiCalls, processingTimeMs: Date.now() - aiStart };
+    }
+  }
+
+  // 메트릭 계산 함수
+  const calcMetrics = (results: typeof patternResults) => {
+    const tp = results.filter(r => r.expected && r.patternDetected).length;
+    const tn = results.filter(r => !r.expected && !r.patternDetected).length;
+    const fp = results.filter(r => !r.expected && r.patternDetected).length;
+    const fn = results.filter(r => r.expected && !r.patternDetected).length;
+
+    const precision = tp + fp > 0 ? tp / (tp + fp) : 1;
+    const recall = tp + fn > 0 ? tp / (tp + fn) : 1;
+    const f1 = precision + recall > 0 ? 2 * (precision * recall) / (precision + recall) : 0;
+    const accuracy = results.length > 0 ? (tp + tn) / results.length : 0;
+
+    return { tp, tn, fp, fn, precision: +precision.toFixed(4), recall: +recall.toFixed(4), f1: +f1.toFixed(4), accuracy: +accuracy.toFixed(4) };
+  };
+
+  const patternMetrics = calcMetrics(patternResults);
+  const hybridMetrics = hybridResults ? calcMetrics(hybridResults) : null;
+
+  // 오분류 상세
+  const misclassified = patternResults.filter(r => !r.patternCorrect).map(r => ({
+    id: r.id,
+    text: r.text.substring(0, 80),
+    expected: r.expected ? 'violation' : 'clean',
+    got: r.patternDetected ? 'violation' : 'clean',
+    type: r.expected && !r.patternDetected ? 'false_negative' : 'false_positive',
+    confidence: r.confidence,
+    matchedCategories: r.matchedCategories,
+  }));
+
+  return c.json({
+    success: true,
+    data: {
+      totalCases: cases.length,
+      processingTimeMs: Date.now() - startTime,
+      pattern: {
+        metrics: patternMetrics,
+        details: patternResults,
+      },
+      ...(hybridMetrics ? {
+        hybrid: {
+          metrics: hybridMetrics,
+          ai: aiStats,
+          details: hybridResults,
+        },
+        comparison: {
+          accuracyDelta: +(hybridMetrics.accuracy - patternMetrics.accuracy).toFixed(4),
+          f1Delta: +(hybridMetrics.f1 - patternMetrics.f1).toFixed(4),
+          recallDelta: +(hybridMetrics.recall - patternMetrics.recall).toFixed(4),
+          precisionDelta: +(hybridMetrics.precision - patternMetrics.precision).toFixed(4),
+          aiCallsMade: aiStats.callsMade,
+          aiProcessingTimeMs: aiStats.processingTimeMs,
+        },
+      } : {}),
+      misclassified,
+    },
+  });
+});
+
+/**
+ * GET /v1/analyze/accuracy-test/cases - 내장 테스트 케이스 목록
+ */
+analyzeRoutes.get('/accuracy-test/cases', (c) => {
+  return c.json({
+    success: true,
+    data: {
+      totalCases: ACCURACY_TEST_CASES.length,
+      truePositives: ACCURACY_TEST_CASES.filter(c => c.expectedViolation).length,
+      trueNegatives: ACCURACY_TEST_CASES.filter(c => !c.expectedViolation).length,
+      cases: ACCURACY_TEST_CASES,
+    },
+  });
+});
+
 export { analyzeRoutes };

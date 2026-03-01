@@ -127,4 +127,75 @@ analysisResultsRoutes.post('/', async (c) => {
   }
 });
 
+// CSV 내보내기
+analysisResultsRoutes.get('/export/csv', async (c) => {
+  try {
+    const crawlSessionId = c.req.query('crawlSessionId');
+    const grade = c.req.query('grade');
+    const limit = parseInt(c.req.query('limit') || '500');
+
+    let query = `
+      SELECT har.id, ch.name as hospital_name, ch.address, ch.homepage_url,
+             har.url_analyzed, har.grade, har.violation_count, har.summary,
+             har.violations, har.status, har.analyzed_at
+      FROM hospital_analysis_results har
+      LEFT JOIN collected_hospitals ch ON har.hospital_id = ch.id
+      WHERE 1=1
+    `;
+    const params: (string | number)[] = [];
+
+    if (crawlSessionId) { query += ' AND har.crawl_session_id = ?'; params.push(crawlSessionId); }
+    if (grade) { query += ' AND har.grade = ?'; params.push(grade); }
+
+    query += ' ORDER BY har.analyzed_at DESC LIMIT ?';
+    params.push(limit);
+
+    const results = await c.env.DB.prepare(query).bind(...params).all();
+    const rows = results.results as Array<Record<string, unknown>>;
+
+    // BOM + CSV header
+    const BOM = '\uFEFF';
+    const headers = ['ID', '병원명', '주소', '홈페이지', '분석URL', '등급', '위반수', '요약', '위반상세', '상태', '분석일시'];
+    const csvRows = [headers.join(',')];
+
+    for (const row of rows) {
+      let violations: Array<{ description?: string; severity?: string; matchedText?: string }> = [];
+      try {
+        violations = row.violations ? JSON.parse(row.violations as string) : [];
+      } catch { /* ignore */ }
+
+      const violationSummary = violations
+        .map((v) => `[${v.severity || '-'}] ${v.description || ''} (${v.matchedText || ''})`.replace(/"/g, "'"))
+        .join(' | ');
+
+      const fields = [
+        row.id || '',
+        row.hospital_name || '',
+        row.address || '',
+        row.homepage_url || '',
+        row.url_analyzed || '',
+        row.grade || '',
+        row.violation_count ?? 0,
+        (row.summary as string || '').replace(/"/g, "'"),
+        violationSummary,
+        row.status || '',
+        row.analyzed_at || '',
+      ];
+
+      csvRows.push(fields.map(f => `"${f}"`).join(','));
+    }
+
+    const csv = BOM + csvRows.join('\n');
+
+    return new Response(csv, {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="medcheck-results-${new Date().toISOString().split('T')[0]}.csv"`,
+      },
+    });
+  } catch (e: unknown) {
+    return handleApiError(c, e);
+  }
+});
+
 export { analysisResultsRoutes };

@@ -21,7 +21,7 @@ export default function PricingTab() {
     const load = async () => {
       try {
         const [statsRes, procRes, areaRes] = await Promise.all([
-          fetch(`${API_BASE}/v2/prices/stats`).then(r => r.json()),
+          fetch(`${API_BASE}/v1/prices/stats`).then(r => r.json()),
           fetch(`${API_BASE}/v1/procedures?hasPrice=true`).then(r => r.json()),
           fetch(`${API_BASE}/v1/target-areas`).then(r => r.json()),
         ]);

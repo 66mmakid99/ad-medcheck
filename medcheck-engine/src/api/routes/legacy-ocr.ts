@@ -4,8 +4,8 @@
 // ============================================
 
 import { Hono } from 'hono';
-import { processOCRAndSavePrices, extractPricesFromOCR } from '../services/price-extractor';
-import { callGeminiVision, OCR_ONLY_PROMPT } from '../services/gemini-ocr';
+import { processOCRAndSavePrices, extractPricesFromOCR } from '../../modules/pricing';
+import { callGeminiVision, OCR_ONLY_PROMPT } from '../../modules/gemini';
 const ocr = new Hono<{ Bindings: Env }>();
 
 // ============================================

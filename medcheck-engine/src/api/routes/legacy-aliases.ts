@@ -8,7 +8,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
-import type { Env } from '../types';
+import type { Env } from '../../types';
 
 const aliases = new Hono<{ Bindings: Env }>();
 

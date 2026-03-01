@@ -9,7 +9,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
-import type { Env } from '../types';
+import type { Env } from '../../types';
 
 const prices = new Hono<{ Bindings: Env }>();
 

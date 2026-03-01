@@ -4,10 +4,10 @@
 
 **AD-MEDCHECK (MADMEDCHECK)** is a Medical Advertisement Compliance Analysis System for Korean medical advertisements. It automatically detects and analyzes potential violations of Korean medical advertising laws (의료법) and related regulations.
 
-**Current Version:** Engine v1.4.0 / Dashboard v1.4.0
+**Current Version:** Engine v2.0.0 / Dashboard v2.0.0
 **Language:** Korean (한국어) with English documentation
 **License:** ISC
-**Last Updated:** 2026-01-31
+**Last Updated:** 2026-03-02
 
 ### Core Value Proposition
 
@@ -105,8 +105,12 @@ ad-medcheck/
 │   ├── src/
 │   │   ├── App.jsx
 │   │   ├── main.jsx
+│   │   ├── lib/config.js          # API_BASE 설정
 │   │   └── components/
-│   │       └── MedCheckDashboard.jsx  # v1.3.0 (1,628 lines)
+│   │       ├── MedCheckApp.jsx    # 메인 앱 (탭 라우팅)
+│   │       ├── layout/            # Sidebar, Layout
+│   │       ├── ui/                # SeverityBadge, GradeBadge
+│   │       └── tabs/             # 17개 탭 컴포넌트
 │   ├── package.json               # React 19 + Vite 7 + Tailwind 4
 │   └── vite.config.js
 │
@@ -131,24 +135,27 @@ ad-medcheck/
 
 ---
 
-## Dashboard Features (14 Tabs)
+## Dashboard Features (17 Tabs)
 
 | Tab | Name | Description |
 |-----|------|-------------|
 | 📊 | Overview | Stats: price records, procedures, screenshots, alerts |
 | 🔄 | Crawl Status | Real-time crawl monitoring (5s polling), start analysis |
-| 🔍 | Analyze | Text analysis with AI option |
+| 🔍 | Analyze | Text analysis with AI option, CSV download |
 | 📁 | Batch Analysis | CSV upload → bulk analysis → download results |
 | 📋 | Patterns | 156 violation patterns, filter, search |
 | 💰 | Pricing | Procedure prices by area, hospital comparison, screenshots |
+| 📊 | Price Analytics | 가격 분석 대시보드 |
 | 🔔 | Price Alerts | Competitor price change detection, screenshot comparison |
 | 🔄 | Mapping Approval | Approve/reject unmapped procedure names |
-| ⚠️ | Exceptions/FP | False positive stats, exception suggestions |
+| ⚠️ | Exceptions/FP | 오탐 신고 검토, 예외 제안 승인, 활성 예외 관리 (v2.0) |
 | 🎭 | Tricks | Evasion pattern management |
-| 📥 | Feedback | User feedback collection, approve/reject (v1.4.0) |
-| 📈 | Performance | Pattern accuracy tracking, flagged patterns (v1.4.0) |
-| 🔧 | Improvements | Learning candidates, exception candidates (v1.4.0) |
-| 📜 | History | Improvement history timeline (v1.4.0) |
+| 📥 | Feedback | User feedback collection, approve/reject |
+| 📈 | Performance | Pattern accuracy tracking, flagged patterns |
+| 🔧 | Improvements | Learning candidates, exception candidates |
+| 👁️ | HITL Queue | 저신뢰도 탐지 결과 검토/판정 (v2.0) |
+| 📜 | History | Improvement history timeline |
+| ⚙️ | Settings | 엔진 설정 (임계값, 파이프라인, 빠른 작업) (v2.0) |
 
 ---
 
@@ -243,9 +250,17 @@ CHECK (col IN ('a', 'b', 'c', NULL))
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/` | Engine info |
-| GET | `/v1/health` | Health check |
+| GET | `/v1/health` | Health check (detailed, DB, external) |
 | POST | `/v1/analyze` | Text analysis |
 | POST | `/v1/analyze-url` | URL analysis |
+| POST | `/v1/analyze/accuracy-test` | 정확도 테스트 (23 케이스) |
+| GET | `/v1/analyze/accuracy-test/cases` | 테스트 케이스 목록 |
+
+### Settings API (v2.0 신규)
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/v1/settings` | 전체 설정 조회 |
+| PUT | `/v1/settings/:key` | 설정 값 수정 |
 
 ### Pattern Management
 | Method | Endpoint | Description |
@@ -290,6 +305,7 @@ CHECK (col IN ('a', 'b', 'c', NULL))
 | GET | `/v1/analysis-results` | Results list |
 | GET | `/v1/analysis-results/stats` | Analysis stats |
 | POST | `/v1/analysis-results` | Save result |
+| GET | `/v1/analysis-results/export/csv` | CSV 다운로드 |
 
 ### Price Alerts & Monitoring
 | Method | Endpoint | Description |
@@ -499,28 +515,31 @@ CHECK (col IN ('a', 'b', 'c', NULL))
 ## Development Status
 
 ### Completed
-- Pattern matching engine (156 patterns)
+- Pattern matching engine (156 patterns, 100% accuracy on 23 test cases)
 - Violation analysis API (text/URL)
-- False positive management
+- False positive management (FalsePositiveTab 구현 완료)
 - Pricing v2 (area-based, screenshots)
 - Price change alerts
 - Auto pipeline (Naver → Google → Analysis)
-- Dashboard deployment (Cloudflare Pages)
+- Dashboard deployment (Cloudflare Pages, 17탭 구조)
 - Real-time dashboard integration (5s polling)
 - OCR 이미지 분석 시스템 (Phase 1-6)
+- AI 정확도 테스트 API (POST /v1/analyze/accuracy-test)
+- CSV 출력 (서버 + 클라이언트)
+- 설정 API + SettingsTab (GET/PUT /v1/settings)
+- HITL 큐 대시보드 탭
 - **자동 개선 시스템 Phase 1** (v1.4.0)
   - 피드백 인프라 (확장 피드백 수집)
   - 성능 추적 서비스 (패턴별/맥락별/진료과목별)
   - 자동 학습 기초 모듈 (예외 후보 생성, 신뢰도 조정)
+- **자동 개선 시스템 Phase 2** (v2.0.0)
+  - 자동 적용 로직 (임계값 기반 auto-apply)
 
 ### In Progress
-- AI Hybrid analysis testing
-- Trick pattern collection
-- 자동 개선 시스템 Phase 2 (자동 적용 로직)
+- AI Hybrid analysis accuracy testing
+- Trick pattern collection (카테고리 19)
 
 ### Not Implemented
-- AI accuracy verification
-- CSV output format improvement (user fixing)
 - 자동 개선 시스템 Phase 3 (A/B 테스트)
 
 ---
@@ -560,20 +579,19 @@ Example: P-56-01-001
 
 ## Known Issues
 
-1. **CSV Output Format**: User is fixing manually
-2. **AI Analysis Testing**: Accuracy not verified (Pattern vs AI Hybrid)
-3. **OCR Not Implemented**: Need Google Vision or similar integration
+1. **AI Hybrid Analysis**: Pattern-only 100% accuracy verified, AI hybrid accuracy not benchmarked
+2. **OCR Migration**: ocr-adapter planned for migration to madmedscv
+3. **A/B Test Infrastructure**: Phase 3 not started
 
 ---
 
 ## Recent Commits
 
 ```
-(pending) feat: 자동 개선 시스템 Phase 1 구현 (피드백 인프라)
-020abfd Merge pull request #12
-ff9db4b fix: SQL 마이그레이션 문법 수정
-d66aec2 feat: OCR 이미지 분석 시스템 완전 구현 (Phase 1-6)
-2447982 feat: 자동 파이프라인 완성 (네이버→구글→분석 연속 실행)
+ad00bf6 feat: FalsePositiveTab + SettingsTab 구현, HistoryTab 필터 버그 수정
+ccc214f fix: pattern accuracy 69.6% → 100% (23 test cases, 0 FP/FN)
+67355db feat: AI accuracy test API + CSV export + health.ts TODO cleanup
+772950d feat: health check real impl + price analytics API + DB indexes
 ```
 
 ---

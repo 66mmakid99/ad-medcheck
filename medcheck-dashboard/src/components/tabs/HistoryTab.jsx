@@ -33,8 +33,8 @@ export default function HistoryTab() {
   useEffect(() => {
     const load = async () => {
       try {
-        const statuses = filter === 'all' ? 'approved' : filter;
-        const res = await fetch(`${API_BASE}/v1/learning/candidates?status=${statuses}&limit=200`);
+        const statusParam = filter === 'all' ? '' : `&status=${filter}`;
+        const res = await fetch(`${API_BASE}/v1/learning/candidates?limit=200${statusParam}`);
         const data = await res.json();
         if (data.success) setHistory(data.data || []);
       } catch (e) { console.error(e); }

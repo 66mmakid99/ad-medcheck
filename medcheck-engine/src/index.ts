@@ -47,6 +47,7 @@ import {
   viralRoutes,
   authRoutes,
   coldmailGenRoutes,
+  settingsRoutes,
 } from './api/routes';
 import type { AppBindings, Env } from './types/env';
 
@@ -1457,6 +1458,7 @@ app.route('/v1/aeo', aeoRoutes);
 app.route('/v1/viral', viralRoutes);
 app.route('/v1/auth', authRoutes);
 app.route('/v1/coldmail', coldmailGenRoutes);
+app.route('/v1/settings', settingsRoutes);
 
 // 병원별 스크린샷
 app.get('/v1/hospitals/:hospitalId/screenshots', async (c) => {

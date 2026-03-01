@@ -35,3 +35,4 @@ export { aeoRoutes } from './aeo';
 export { viralRoutes } from './viral';
 export { authRoutes } from './auth';
 export { coldmailGenRoutes } from './coldmail-gen';
+export { settingsRoutes } from './settings';

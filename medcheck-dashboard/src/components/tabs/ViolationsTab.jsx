@@ -17,6 +17,7 @@ export default function ViolationsTab() {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [page, setPage] = useState(0);
   const [gradeFilter, setGradeFilter] = useState('');
   const [selected, setSelected] = useState(null);
@@ -25,6 +26,7 @@ export default function ViolationsTab() {
 
   const loadData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const filters = [];
       if (gradeFilter) filters.push({ column: 'grade', op: 'eq', value: gradeFilter });
@@ -40,6 +42,7 @@ export default function ViolationsTab() {
       setTotal(t || 0);
     } catch (e) {
       console.error('Supabase query error:', e);
+      setError('위반 데이터를 불러오지 못했습니다.');
       setRows([]);
     }
     setLoading(false);

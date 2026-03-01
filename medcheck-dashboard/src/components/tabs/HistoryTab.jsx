@@ -28,16 +28,21 @@ function MiniCard({ label, value, color = 'accent' }) {
 export default function HistoryTab() {
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [filter, setFilter] = useState('all'); // all, approved, auto_applied
 
   useEffect(() => {
     const load = async () => {
+      setError(null);
       try {
         const statusParam = filter === 'all' ? '' : `&status=${filter}`;
         const res = await fetch(`${API_BASE}/v1/learning/candidates?limit=200${statusParam}`);
         const data = await res.json();
         if (data.success) setHistory(data.data || []);
-      } catch (e) { console.error(e); }
+      } catch (e) {
+        console.error(e);
+        setError('이력 데이터를 불러오지 못했습니다.');
+      }
       setLoading(false);
     };
     load();

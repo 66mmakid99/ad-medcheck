@@ -11,14 +11,19 @@ export default function PriceAlertsTab() {
   const [alerts, setAlerts] = useState([]);
   const [selected, setSelected] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const load = async () => {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch(`${API_BASE}/v1/price-alerts?isRead=false`);
       const data = await res.json();
       if (data.success) setAlerts(data.data || []);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setError('알림을 불러오지 못했습니다.');
+    }
     setLoading(false);
   };
 
@@ -47,6 +52,16 @@ export default function PriceAlertsTab() {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-card rounded-xl border border-red-500/20 p-10 text-center">
+        <p className="text-3xl mb-3">⚠️</p>
+        <p className="text-sm text-red-400 mb-3">{error}</p>
+        <button onClick={load} className="px-4 py-2 bg-accent text-white rounded-lg text-sm">다시 시도</button>
       </div>
     );
   }

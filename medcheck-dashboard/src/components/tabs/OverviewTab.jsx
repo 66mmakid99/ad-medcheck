@@ -5,6 +5,7 @@ import GradeBadge from '../ui/GradeBadge';
 
 export default function OverviewTab() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [healthData, setHealthData] = useState(null);
   const [crawlerStatus, setCrawlerStatus] = useState(null);
   const [analysisStats, setAnalysisStats] = useState(null);
@@ -14,6 +15,7 @@ export default function OverviewTab() {
 
   const loadData = async () => {
     setLoading(true);
+    setError(null);
     try {
       const summaryRes = await fetch(`${API_BASE}/v1/dashboard/summary`);
       const summaryData = await summaryRes.json();
@@ -45,6 +47,7 @@ export default function OverviewTab() {
       fetch(`${API_BASE}/v1/health`).then(r => r.json()).then(d => setHealthData(d)).catch(() => {});
     } catch (e) {
       console.error('Dashboard load error:', e);
+      setError('데이터를 불러오지 못했습니다.');
     }
     setLoading(false);
   };
@@ -79,6 +82,16 @@ export default function OverviewTab() {
           {[1,2,3,4].map(i => <div key={i} className="bg-card rounded-xl h-28 border border-border" />)}
         </div>
         <div className="bg-card rounded-xl h-64 border border-border" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-card rounded-xl border border-red-500/20 p-10 text-center">
+        <p className="text-3xl mb-3">⚠️</p>
+        <p className="text-sm text-red-400 mb-3">{error}</p>
+        <button onClick={loadData} className="px-4 py-2 bg-accent text-white rounded-lg text-sm">다시 시도</button>
       </div>
     );
   }

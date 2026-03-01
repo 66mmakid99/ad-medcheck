@@ -47,18 +47,25 @@
 
 ---
 
-## 진행 중
-
-### Phase 7: 품질 강화
-- [ ] A/B 테스트 프레임워크 (자동 개선 Phase 3)
-- [ ] 꼼수 패턴 수집 (카테고리 19)
-- [ ] AI 하이브리드 정확도 벤치마크
-- [ ] 자동화 테스트 (Vitest)
+### Phase 7: 품질 강화 (완료)
+- [x] A/B 테스트 프레임워크 (ab-testing.ts + migration 027)
+- [x] 꼼수 패턴 수집 (카테고리 19: 5→10개)
+- [x] AI 하이브리드 정확도 벤치마크 (ai-hybrid-benchmark.test.ts)
+- [x] 자동화 테스트 (Vitest: 50+ 테스트)
+- [x] D1 성능 인덱스 적용
+- [x] 대시보드 에러 핸들링 통일
 
 ---
 
 ## 미래 계획
 
-- madmedscv 통합 (OCR/크롤러 이관)
+### madmedscv 통합 (이관 대상)
+현재 엔진에 포함된 4개 모듈의 madmedscv 이관 예정:
+- `adapters/ocr-adapter.ts` — OCR 처리 (Gemini Vision)
+- `scheduled/crawler-handler.ts` — Cron 크롤러 (정적 사이트)
+- `utils/fetch-with-encoding.ts` — URL 분석 fetch 유틸
+- `types/ocr-types.ts` — OCR 공유 타입 (패키지 분리)
+
+### 기타
 - 마케팅 트렌드 모니터링
 - B2B SaaS 포탈

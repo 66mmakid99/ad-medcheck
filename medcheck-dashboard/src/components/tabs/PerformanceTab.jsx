@@ -36,12 +36,14 @@ export default function PerformanceTab() {
   const [flagged, setFlagged] = useState([]);
   const [patterns, setPatterns] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [aggregating, setAggregating] = useState(false);
   const [selectedPattern, setSelectedPattern] = useState(null);
   const [patternDetail, setPatternDetail] = useState(null);
 
   const load = async () => {
     setLoading(true);
+    setError(null);
     try {
       const [repRes, flagRes, patRes] = await Promise.all([
         fetch(`${API_BASE}/v1/performance/report`).then(r => r.json()),
@@ -51,7 +53,10 @@ export default function PerformanceTab() {
       if (repRes.success) setReport(repRes.data);
       if (flagRes.success) setFlagged(flagRes.data || []);
       if (patRes.success) setPatterns(patRes.data || []);
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setError('성능 데이터를 불러오지 못했습니다.');
+    }
     setLoading(false);
   };
 
@@ -79,6 +84,16 @@ export default function PerformanceTab() {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-card rounded-xl border border-red-500/20 p-10 text-center">
+        <p className="text-3xl mb-3">⚠️</p>
+        <p className="text-sm text-red-400 mb-3">{error}</p>
+        <button onClick={load} className="px-4 py-2 bg-accent text-white rounded-lg text-sm">다시 시도</button>
       </div>
     );
   }

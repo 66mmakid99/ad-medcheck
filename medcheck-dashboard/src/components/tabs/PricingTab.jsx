@@ -16,23 +16,27 @@ export default function PricingTab() {
   const [detail, setDetail] = useState(null);
   const [compare, setCompare] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const [statsRes, procRes, areaRes] = await Promise.all([
-          fetch(`${API_BASE}/v1/prices/stats`).then(r => r.json()),
-          fetch(`${API_BASE}/v1/procedures?hasPrice=true`).then(r => r.json()),
-          fetch(`${API_BASE}/v1/target-areas`).then(r => r.json()),
-        ]);
-        if (statsRes.success) setStats(statsRes.data);
-        if (procRes.success) setProcedures(procRes.data || []);
-        if (areaRes.success) setTargetAreas(areaRes.data || []);
-      } catch (e) { console.error(e); }
-      setLoading(false);
-    };
-    load();
-  }, []);
+  const loadInitial = async () => {
+    setError(null);
+    try {
+      const [statsRes, procRes, areaRes] = await Promise.all([
+        fetch(`${API_BASE}/v1/prices/stats`).then(r => r.json()),
+        fetch(`${API_BASE}/v1/procedures?hasPrice=true`).then(r => r.json()),
+        fetch(`${API_BASE}/v1/target-areas`).then(r => r.json()),
+      ]);
+      if (statsRes.success) setStats(statsRes.data);
+      if (procRes.success) setProcedures(procRes.data || []);
+      if (areaRes.success) setTargetAreas(areaRes.data || []);
+    } catch (e) {
+      console.error(e);
+      setError('가격 데이터를 불러오지 못했습니다.');
+    }
+    setLoading(false);
+  };
+
+  useEffect(() => { loadInitial(); }, []);
 
   const loadDetail = async (id) => {
     setSelectedProcedure(id);
@@ -57,6 +61,16 @@ export default function PricingTab() {
     return (
       <div className="flex items-center justify-center py-20">
         <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-card rounded-xl border border-red-500/20 p-10 text-center">
+        <p className="text-3xl mb-3">⚠️</p>
+        <p className="text-sm text-red-400 mb-3">{error}</p>
+        <button onClick={loadInitial} className="px-4 py-2 bg-accent text-white rounded-lg text-sm">다시 시도</button>
       </div>
     );
   }

@@ -10,6 +10,7 @@ const GRADE_COLORS = {
 
 export default function ReportsTab() {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [stats, setStats] = useState({ total: 0, byGrade: {}, byMode: {}, topViolations: [] });
 
   useEffect(() => { loadReport(); }, []);
@@ -60,6 +61,7 @@ export default function ReportsTab() {
       }
     } catch (e) {
       console.error('Report load error:', e);
+      setError('리포트를 불러오지 못했습니다.');
     }
     setLoading(false);
   };
@@ -81,6 +83,16 @@ export default function ReportsTab() {
           <div className="bg-card rounded-xl h-64 border border-border" />
           <div className="bg-card rounded-xl h-64 border border-border" />
         </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="bg-card rounded-xl border border-red-500/20 p-10 text-center">
+        <p className="text-3xl mb-3">⚠️</p>
+        <p className="text-sm text-red-400 mb-3">{error}</p>
+        <button onClick={loadReport} className="px-4 py-2 bg-accent text-white rounded-lg text-sm">다시 시도</button>
       </div>
     );
   }

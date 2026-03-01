@@ -6,6 +6,7 @@ import SeverityBadge from '../ui/SeverityBadge';
 export default function HospitalsTab() {
   const [hospitals, setHospitals] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [gradeFilter, setGradeFilter] = useState('');
@@ -14,6 +15,7 @@ export default function HospitalsTab() {
 
   const loadData = async () => {
     setLoading(true);
+    setError(null);
     try {
       let url = `${API_BASE}/v1/dashboard/hospitals?limit=100`;
       if (gradeFilter) url += `&grade=${gradeFilter}`;
@@ -22,7 +24,10 @@ export default function HospitalsTab() {
         const items = Array.isArray(res.data) ? res.data : (res.data?.hospitals || res.data?.results || []);
         setHospitals(items);
       }
-    } catch (e) { console.error(e); }
+    } catch (e) {
+      console.error(e);
+      setError('병원 목록을 불러오지 못했습니다.');
+    }
     setLoading(false);
   };
 
@@ -92,7 +97,12 @@ export default function HospitalsTab() {
           <div className="px-4 py-3 border-b border-border bg-surface">
             <h4 className="text-sm font-semibold text-text-primary">병원별 위반 현황</h4>
           </div>
-          {loading ? (
+          {error ? (
+            <div className="p-8 text-center">
+              <p className="text-sm text-red-400 mb-2">{error}</p>
+              <button onClick={loadData} className="text-xs text-accent hover:underline">다시 시도</button>
+            </div>
+          ) : loading ? (
             <div className="p-8 text-center text-text-muted">로딩 중...</div>
           ) : hospitals.length > 0 ? (
             <div className="divide-y divide-border max-h-[520px] overflow-y-auto sidebar-scroll">

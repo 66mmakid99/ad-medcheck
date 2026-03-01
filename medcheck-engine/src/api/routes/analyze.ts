@@ -12,9 +12,15 @@ import { patternMatcher } from '../../modules/violation-detector';
 import { contextAnalyzer } from '../../modules/ai-analyzer';
 import type { AnalysisGrade, ScoreResult } from '../../modules/violation-detector';
 import type { ViolationResult } from '../../types';
-import { ocrAdapter, createGeminiFlashClient } from '../../adapters/ocr-adapter';
+import { ocrAdapter } from '../../adapters/ocr-adapter';
 import { runGeminiPipeline } from '../../services/analysis-pipeline';
 import type { GeminiPipelineResult } from '../../services/analysis-pipeline';
+import {
+  classifyAnalysisResults,
+  mergeRuleAndAIResults,
+  calculateCompositeConfidence,
+} from '../../services/result-classifier';
+import type { Determination, DetectionSource } from '../../types';
 import type { OCRResult, ExtractedPrice, ImageViolation } from '../../adapters/ocr-adapter';
 import { imageCollector, collectImagesFromUrl } from '../../modules/image-collector';
 import { priceAdValidator, validatePriceAdBatch } from '../../modules/price-ad-validator';
@@ -320,8 +326,14 @@ analyzeRoutes.post('/', async (c) => {
   }
 });
 /**
- * POST /v1/analyze-url - URL 기반 텍스트 분석
- * GEMINI_API_KEY가 있으면 Gemini 파이프라인 실행, 없거나 실패시 기존 패턴 매칭 fallback
+ * POST /v1/analyze-url - URL 기반 텍스트 분석 (Rule-First 파이프라인)
+ *
+ * Step 1: URL fetch → 텍스트 추출
+ * Step 2: violationDetector.analyze() — Rule Engine 실행 (항상)
+ * Step 3: classifyAnalysisResults() — CONFIRMED/SAFE/AMBIGUOUS 분류
+ * Step 4: AMBIGUOUS + Gemini 키 있음 → runGeminiPipeline() (조건부)
+ * Step 5: mergeRuleAndAIResults() — 결과 병합
+ * Step 6: 응답 반환
  */
 analyzeRoutes.post('-url', async (c) => {
   let body: { url: string; hospitalId?: number; hospitalName?: string };
@@ -351,90 +363,8 @@ analyzeRoutes.post('-url', async (c) => {
   const startTime = Date.now();
   const geminiApiKey = (c.env as any).GEMINI_API_KEY as string | undefined;
 
-  // ━━━━ Gemini 파이프라인 (GEMINI_API_KEY가 있을 때) ━━━━
-  if (geminiApiKey) {
-    try {
-      const geminiResult: GeminiPipelineResult = await runGeminiPipeline(
-        {
-          url: targetUrl,
-          hospitalId: body.hospitalId ? String(body.hospitalId) : undefined,
-          hospitalName: body.hospitalName,
-          db: (c.env as any).DB,
-          supabaseUrl: (c.env as any).SUPABASE_URL,
-          supabaseKey: (c.env as any).SUPABASE_ANON_KEY,
-          firecrawlUrl: (c.env as any).FIRECRAWL_URL,
-          firecrawlApiKey: (c.env as any).FIRECRAWL_API_KEY,
-        },
-        geminiApiKey,
-      );
-
-      if (geminiResult.success && geminiResult.audit) {
-        const audit = geminiResult.audit;
-        const grade = audit.grade;
-
-        const violations = audit.finalViolations.map((v) => ({
-          type: v.category,
-          status: v.confidence >= 0.8 ? 'likely' : 'possible',
-          severity: v.adjustedSeverity || v.severity,
-          matchedText: v.originalText,
-          context: v.context,
-          description: v.category,
-          legalBasis: v.patternId ? [{ article: v.patternId }] : [],
-          confidence: v.confidence,
-          patternId: v.patternId,
-          ai_reasoning: v.reasoning,
-          sectionType: v.sectionType,
-          fromImage: v.fromImage || false,
-          disclaimerPresent: v.disclaimerPresent || false,
-          source: v.source || 'gemini',
-        }));
-
-        return c.json({
-          success: true,
-          data: {
-            analysisId: audit.id,
-            url: targetUrl,
-            hospitalId: body.hospitalId,
-            hospitalName: body.hospitalName,
-            inputLength: geminiResult.meta.textLength,
-            violationCount: violations.length,
-            violations,
-            score: {
-              cleanScore: grade.cleanScore,
-              grade: grade.grade,
-              violationCount: grade.violationCount,
-            },
-            grade: grade.grade,
-            gradeDescription: `${grade.grade} (${grade.cleanScore}점)`,
-            summary: `위반 ${audit.finalCount}건 (Gemini AI 분석)`,
-            recommendations: [],
-            grayZones: audit.grayZones,
-            auditIssues: audit.auditIssues,
-            geminiOriginalCount: audit.geminiOriginalCount,
-            auditDelta: audit.auditDelta,
-            analysisMode: 'gemini',
-            meta: {
-              fetchTimeMs: geminiResult.meta.fetchTimeMs,
-              geminiTimeMs: geminiResult.meta.geminiTimeMs,
-              auditTimeMs: geminiResult.meta.auditTimeMs,
-              crawlMethod: geminiResult.meta.crawlMethod,
-              crossIntel: geminiResult.meta.crossIntel,
-            },
-            processingTimeMs: Date.now() - startTime,
-            analyzedAt: geminiResult.meta.timestamp,
-          },
-        });
-      }
-
-      // Gemini 파이프라인 실패 또는 audit 없음 → fallback
-      console.warn(`[analyze-url] Gemini pipeline fallback: success=${geminiResult.success}, hasAudit=${!!geminiResult.audit}, error=${geminiResult.error?.code} - ${geminiResult.error?.message}`);
-    } catch (geminiError: unknown) {
-      const errMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
-      console.warn(`[analyze-url] Gemini pipeline error, falling back: ${errMsg}`);
-    }
-  }
-
-  // ━━━━ Fallback: 기존 패턴 매칭 ━━━━
+  // ━━━━ Step 1: URL fetch → 텍스트 추출 ━━━━
+  let textContent: string;
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 30000);
@@ -465,14 +395,14 @@ analyzeRoutes.post('-url', async (c) => {
         success: false,
         error: {
           code: 'FETCH_ERROR',
-          message: `URL 접근 실패: ${htmlResponse.status} ${htmlResponse.statusText}`
+          message: `URL 접근 실패: ${htmlResponse.status} ${htmlResponse.statusText}`,
         },
       }, 400);
     }
 
     const html = await htmlResponse.text();
 
-    const textContent = html
+    textContent = html
       .replace(/<script[^>]*>[\s\S]*?<\/script>/gi, '')
       .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '')
       .replace(/<[^>]+>/g, ' ')
@@ -486,27 +416,153 @@ analyzeRoutes.post('-url', async (c) => {
         error: { code: 'EMPTY_CONTENT', message: '분석할 텍스트가 부족합니다.' },
       }, 400);
     }
+  } catch (error) {
+    const err = error as Error;
+    return c.json({
+      success: false,
+      error: { code: 'FETCH_ERROR', message: err.message },
+    }, 500);
+  }
 
-    const result = violationDetector.analyze({ text: textContent, url: targetUrl });
+  const fetchTimeMs = Date.now() - startTime;
+
+  try {
+    // ━━━━ Step 2: Rule Engine 실행 (항상) ━━━━
+    const ruleResult = violationDetector.analyze({ text: textContent, url: targetUrl });
+    const ruleTimeMs = Date.now() - startTime - fetchTimeMs;
+
+    // ━━━━ Step 3: 분류 (CONFIRMED / SAFE / AMBIGUOUS) ━━━━
+    const classification = classifyAnalysisResults(ruleResult.judgment.violations);
+
+    // ━━━━ Step 4: AMBIGUOUS + Gemini 키 → AI 보강 ━━━━
+    let finalViolations = classification.violations;
+    let determination: Determination = classification.determination;
+    let analysisMode: DetectionSource = 'rule_only';
+    let geminiMeta: {
+      geminiTimeMs?: number;
+      auditTimeMs?: number;
+      grayZones?: unknown[];
+      auditIssues?: unknown[];
+      geminiOriginalCount?: number;
+      auditDelta?: number;
+      crawlMethod?: string;
+      crossIntel?: unknown;
+    } = {};
+
+    if (classification.needsAI && geminiApiKey) {
+      try {
+        const geminiResult: GeminiPipelineResult = await runGeminiPipeline(
+          {
+            url: targetUrl,
+            hospitalId: body.hospitalId ? String(body.hospitalId) : undefined,
+            hospitalName: body.hospitalName,
+            db: (c.env as any).DB,
+            supabaseUrl: (c.env as any).SUPABASE_URL,
+            supabaseKey: (c.env as any).SUPABASE_ANON_KEY,
+          },
+          geminiApiKey,
+        );
+
+        if (geminiResult.success && geminiResult.audit) {
+          const audit = geminiResult.audit;
+
+          // AI 위반 결과를 ViolationResult 형태로 변환
+          const aiViolations: ViolationResult[] = audit.finalViolations.map((v) => ({
+            type: v.category as ViolationResult['type'],
+            status: (v.confidence >= 0.8 ? 'likely' : 'possible') as ViolationResult['status'],
+            severity: (v.adjustedSeverity || v.severity) as ViolationResult['severity'],
+            matchedText: v.originalText,
+            description: v.category,
+            legalBasis: v.patternId ? [{ law: '의료법', article: v.patternId, description: v.reasoning || v.category }] : [],
+            confidence: v.confidence,
+            patternId: v.patternId,
+          }));
+
+          // ━━━━ Step 5: 결과 병합 ━━━━
+          const merged = mergeRuleAndAIResults(
+            classification.violations,
+            aiViolations,
+            classification.determination
+          );
+
+          finalViolations = merged.violations;
+          determination = merged.determination;
+          analysisMode = 'rule_and_ai';
+
+          geminiMeta = {
+            geminiTimeMs: geminiResult.meta.geminiTimeMs,
+            auditTimeMs: geminiResult.meta.auditTimeMs,
+            grayZones: audit.grayZones,
+            auditIssues: audit.auditIssues,
+            geminiOriginalCount: audit.geminiOriginalCount,
+            auditDelta: audit.auditDelta,
+            crawlMethod: geminiResult.meta.crawlMethod,
+            crossIntel: geminiResult.meta.crossIntel,
+          };
+        } else {
+          console.warn(`[analyze-url] Gemini pipeline no audit: success=${geminiResult.success}, error=${geminiResult.error?.code}`);
+        }
+      } catch (geminiError: unknown) {
+        const errMsg = geminiError instanceof Error ? geminiError.message : String(geminiError);
+        console.warn(`[analyze-url] Gemini AI 보강 실패 (Rule 결과 유지): ${errMsg}`);
+        // AI 실패해도 Rule 결과는 유지
+      }
+    }
+
+    // ━━━━ Step 6: 응답 반환 ━━━━
+    const avgCompositeConfidence =
+      finalViolations.length > 0
+        ? finalViolations.reduce(
+            (sum, v) => sum + (v.compositeConfidence ?? v.confidence),
+            0
+          ) / finalViolations.length
+        : classification.avgConfidence;
 
     return c.json({
       success: true,
       data: {
-        analysisId: result.id,
+        analysisId: ruleResult.id,
         url: targetUrl,
         hospitalId: body.hospitalId,
         hospitalName: body.hospitalName,
         inputLength: textContent.length,
-        violationCount: result.judgment.violations.length,
-        violations: result.judgment.violations,
-        score: result.judgment.score,
-        grade: result.judgment.score.grade,
-        gradeDescription: result.judgment.score.gradeDescription,
-        summary: result.judgment.summary,
-        recommendations: result.judgment.recommendations,
-        analysisMode: 'pattern_only',
+        violationCount: finalViolations.length,
+        violations: finalViolations,
+        score: ruleResult.judgment.score,
+        grade: ruleResult.judgment.score.grade,
+        gradeDescription: ruleResult.judgment.score.gradeDescription,
+        summary: ruleResult.judgment.summary,
+        recommendations: ruleResult.judgment.recommendations,
+        // 기존 호환 필드
+        analysisMode,
         processingTimeMs: Date.now() - startTime,
-        analyzedAt: result.judgment.analyzedAt.toISOString(),
+        analyzedAt: ruleResult.judgment.analyzedAt.toISOString(),
+        // Rule-First 신규 필드 (additive)
+        determination,
+        compositeConfidence: avgCompositeConfidence,
+        ruleClassification: classification.determination,
+        aiInvoked: analysisMode === 'rule_and_ai',
+        // Gemini 메타 (AI 호출 시에만)
+        ...(analysisMode === 'rule_and_ai'
+          ? {
+              grayZones: geminiMeta.grayZones,
+              auditIssues: geminiMeta.auditIssues,
+              geminiOriginalCount: geminiMeta.geminiOriginalCount,
+              auditDelta: geminiMeta.auditDelta,
+            }
+          : {}),
+        meta: {
+          fetchTimeMs,
+          ruleTimeMs,
+          ...(geminiMeta.geminiTimeMs !== undefined
+            ? {
+                geminiTimeMs: geminiMeta.geminiTimeMs,
+                auditTimeMs: geminiMeta.auditTimeMs,
+                crawlMethod: geminiMeta.crawlMethod,
+                crossIntel: geminiMeta.crossIntel,
+              }
+            : {}),
+        },
       },
     });
   } catch (error) {

@@ -182,6 +182,15 @@ export interface AuditResult {
 /** 감사 후 최종 위반 (source 필드 추가) */
 export interface AuditedViolation extends GeminiViolation {
   source?: 'gemini' | 'rule_engine_supplement';
+
+  /** 판정 결과 (Rule-First 파이프라인) */
+  determination?: import('./index').Determination;
+
+  /** 복합 신뢰도 (Rule + AI + Context 가중 평균) */
+  compositeConfidence?: number;
+
+  /** 탐지 출처 */
+  detectionSource?: import('./index').DetectionSource;
 }
 
 /** 등급 결과 */

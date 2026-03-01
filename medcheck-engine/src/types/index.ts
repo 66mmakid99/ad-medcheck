@@ -83,6 +83,24 @@ export type ViolationStatus =
   | 'clean';         // 위반 아님
 
 /**
+ * 분석 판정 결과 (Rule-First 파이프라인)
+ */
+export type Determination =
+  | 'confirmed'      // Rule 엔진으로 확정 (고신뢰)
+  | 'safe'           // 위반 없음 확정
+  | 'ambiguous'      // 애매 → AI 추가 분석 필요
+  | 'ai_verified'    // AI로 검증 완료
+  | 'hitl_required'; // 사람 검토 필요 (낮은 confidence)
+
+/**
+ * 탐지 출처
+ */
+export type DetectionSource =
+  | 'rule_only'      // Rule 엔진만으로 탐지
+  | 'rule_and_ai'    // Rule + AI 병합
+  | 'ai_fallback';   // AI fallback으로 탐지
+
+/**
  * 위반 유형
  */
 export type ViolationType =
@@ -143,6 +161,15 @@ export interface ViolationResult {
 
   /** 매칭된 패턴 ID */
   patternId?: string;
+
+  /** 판정 결과 (Rule-First 파이프라인) */
+  determination?: Determination;
+
+  /** 복합 신뢰도 (Rule + AI + Context 가중 평균) */
+  compositeConfidence?: number;
+
+  /** 탐지 출처 */
+  detectionSource?: DetectionSource;
 }
 
 // ============================================

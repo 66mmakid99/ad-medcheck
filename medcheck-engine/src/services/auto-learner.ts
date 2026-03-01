@@ -772,6 +772,149 @@ export class AutoLearner {
   }
 
   // ============================================
+  // 학습 결과 실적용
+  // ============================================
+
+  /**
+   * 승인된 학습 결과를 실제 시스템에 적용
+   */
+  async applyLearning(logId: string): Promise<{
+    applied: boolean;
+    learningType: string;
+    detail: string;
+  }> {
+    const log = await this.db
+      .prepare('SELECT * FROM auto_learning_log WHERE id = ?')
+      .bind(logId)
+      .first() as any;
+
+    if (!log) {
+      return { applied: false, learningType: 'unknown', detail: '학습 로그를 찾을 수 없음' };
+    }
+
+    if (log.status !== 'pending' && log.status !== 'approved') {
+      return { applied: false, learningType: log.learning_type, detail: `상태 ${log.status}은 적용 불가` };
+    }
+
+    const outputData = JSON.parse(log.output_data || '{}');
+    const inputData = JSON.parse(log.input_data || '{}');
+
+    switch (log.learning_type as LearningType) {
+      case 'exception_generated': {
+        // pattern_exceptions에 INSERT + exception_candidates를 merged로 업데이트
+        const exceptionId = `PE-${Date.now()}-${Math.random().toString(36).substr(2, 6)}`;
+        await this.db
+          .prepare(`
+            INSERT OR IGNORE INTO pattern_exceptions
+            (id, pattern_id, exception_type, exception_value, reason, created_by)
+            VALUES (?, ?, ?, ?, ?, 'auto_learner')
+          `)
+          .bind(
+            exceptionId,
+            log.target_id.startsWith('EC-') ? inputData.patternId : log.target_id,
+            inputData.exceptionType || 'keyword',
+            outputData.exceptionPattern || '',
+            `자동 학습 적용 (confidence: ${(log.confidence_score * 100).toFixed(1)}%)`
+          )
+          .run();
+
+        // exception_candidates 상태를 merged로
+        if (log.target_id.startsWith('EC-')) {
+          await this.db
+            .prepare(`UPDATE exception_candidates SET status = 'merged', updated_at = datetime('now') WHERE id = ?`)
+            .bind(log.target_id)
+            .run();
+        }
+
+        // 학습 로그 상태를 auto_applied로
+        await this.db
+          .prepare(`UPDATE auto_learning_log SET status = 'auto_applied', applied_at = datetime('now'), applied_by = 'system', updated_at = datetime('now') WHERE id = ?`)
+          .bind(logId)
+          .run();
+
+        return { applied: true, learningType: 'exception_generated', detail: `예외 규칙 ${exceptionId} 적용됨` };
+      }
+
+      case 'confidence_adjusted': {
+        // flywheel_pattern_performance에 confidence_adjustment 업데이트
+        const newConfidence = outputData.newConfidence;
+        const previousConfidence = inputData.previousConfidence;
+
+        await this.db
+          .prepare(`
+            INSERT INTO flywheel_pattern_performance (pattern_id, confidence_adjustment, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(pattern_id) DO UPDATE SET
+              confidence_adjustment = ?,
+              updated_at = datetime('now')
+          `)
+          .bind(log.target_id, newConfidence - previousConfidence, newConfidence - previousConfidence)
+          .run();
+
+        await this.db
+          .prepare(`UPDATE auto_learning_log SET status = 'auto_applied', applied_at = datetime('now'), applied_by = 'system', updated_at = datetime('now') WHERE id = ?`)
+          .bind(logId)
+          .run();
+
+        return { applied: true, learningType: 'confidence_adjusted', detail: `패턴 ${log.target_id} 신뢰도 조정: ${(previousConfidence * 100).toFixed(0)}% → ${(newConfidence * 100).toFixed(0)}%` };
+      }
+
+      case 'mapping_learned': {
+        // mapping_learning_data의 is_active 활성화
+        await this.db
+          .prepare(`UPDATE mapping_learning_data SET is_active = 1, updated_at = datetime('now') WHERE id = ?`)
+          .bind(log.target_id)
+          .run();
+
+        await this.db
+          .prepare(`UPDATE auto_learning_log SET status = 'auto_applied', applied_at = datetime('now'), applied_by = 'system', updated_at = datetime('now') WHERE id = ?`)
+          .bind(logId)
+          .run();
+
+        return { applied: true, learningType: 'mapping_learned', detail: `매핑 ${log.target_id} 활성화됨` };
+      }
+
+      default:
+        return { applied: false, learningType: log.learning_type, detail: `${log.learning_type}은 수동 적용 필요` };
+    }
+  }
+
+  /**
+   * 자동 적용 가능한 전체 학습 일괄 처리
+   */
+  async autoApplyEligible(): Promise<{
+    total: number;
+    applied: number;
+    skipped: number;
+    results: Array<{ logId: string; applied: boolean; detail: string }>;
+  }> {
+    const eligible = await this.getAutoApplyEligible();
+    const results: Array<{ logId: string; applied: boolean; detail: string }> = [];
+    let applied = 0;
+    let skipped = 0;
+
+    for (const log of eligible) {
+      // 이중 체크: shouldAutoApply 재검증
+      const check = await this.shouldAutoApply(log.id);
+      if (!check.eligible) {
+        skipped++;
+        results.push({ logId: log.id, applied: false, detail: check.reason });
+        continue;
+      }
+
+      const result = await this.applyLearning(log.id);
+      if (result.applied) {
+        applied++;
+      } else {
+        skipped++;
+      }
+      results.push({ logId: log.id, applied: result.applied, detail: result.detail });
+    }
+
+    return { total: eligible.length, applied, skipped, results };
+  }
+
+  // ============================================
   // 학습 로그 기록
   // ============================================
 

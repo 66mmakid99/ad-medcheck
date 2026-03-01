@@ -18,6 +18,7 @@ import { imageCollector, collectImagesFromUrl } from '../../modules/image-collec
 import { priceAdValidator, validatePriceAdBatch } from '../../modules/price-ad-validator';
 import type { PriceAdValidationResult } from '../../modules/price-ad-validator';
 import { createPriceSaver } from '../../modules/price-saver';
+import { postprocessViolations } from '../../services/result-postprocessor';
 
 // ============================================
 // 타입 정의
@@ -254,6 +255,9 @@ analyzeRoutes.post('/', async (c) => {
         };
       }
     }
+
+    // 2.5. 후처리: 네비게이션/중복/병원명 오탐 제거
+    allViolations = postprocessViolations(allViolations, body.metadata?.hospitalName);
 
     // 3. 점수 재계산 (AI 추가 위반 포함)
     const finalScore = result.judgment.score;

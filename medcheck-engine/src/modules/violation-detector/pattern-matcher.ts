@@ -407,7 +407,9 @@ export class PatternMatcher {
         // 면책조항 감지: 문장 수준 또는 페이지 수준
         let disclaimerDetected = pageHasDisclaimer;
         if (enableContextExceptionFilter) {
-          const skipNegationFilter = pattern.category === '부작용부정';
+          // 부정어가 위반의 핵심인 카테고리/패턴은 부정어 필터 건너뜀
+          const patternUsesNegation = /없|안|절대|0%/.test(pattern.pattern);
+          const skipNegationFilter = pattern.category === '부작용부정' || patternUsesNegation;
           const exceptionCheck = this.checkContextExceptions(
             text,
             position,
@@ -548,10 +550,19 @@ export class PatternMatcher {
     }
 
     // ✅ 추가: 위반 약화 키워드 (위반 가능성 낮음)
-    const reduceKeywords = ['수 있습니다', '수도 있', '개인차', '개인에 따라', '노력'];
+    const reduceKeywords = ['수 있습니다', '수도 있', '개인차', '개인에 따라', '노력', '가능한', '가능합니다'];
     for (const keyword of reduceKeywords) {
       if (context.includes(keyword)) {
         confidence -= 0.1;
+        break;
+      }
+    }
+
+    // 장비/기기 도입 문맥 → 추가 감점 (시술 효과가 아닌 장비 설명)
+    const equipmentContext = ['장비를', '기기를', '도입하', '도입한', '장비 도입', '시스템 도입'];
+    for (const keyword of equipmentContext) {
+      if (context.includes(keyword)) {
+        confidence -= 0.15;
         break;
       }
     }

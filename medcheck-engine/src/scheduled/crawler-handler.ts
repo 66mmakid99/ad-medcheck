@@ -1,16 +1,19 @@
 /**
  * 클라우드 크롤러 (Scheduled Handler)
- * 
+ *
+ * TODO: 향후 madmedscv로 이관 예정.
+ *       현재는 Cloudflare Cron에서 직접 fetch로 정적 사이트만 처리.
+ *       SPA 사이트는 madmedscv의 Puppeteer 크롤러가 담당.
+ *
  * Cloudflare Workers Cron Trigger로 자동 실행됩니다.
- * 로컬 PC가 필요 없습니다!
- * 
+ *
  * 흐름:
  * 1. Cron이 이 핸들러를 호출
  * 2. D1에서 분석 대상 병원 목록을 가져옴 (crawl_queue)
  * 3. 각 병원 URL을 fetch로 가져와서 분석
  * 4. 결과를 D1에 저장
  * 5. 대시보드에서 바로 조회 가능
- * 
+ *
  * 위치: src/scheduled/crawler-handler.ts
  */
 
@@ -156,8 +159,6 @@ export async function handleScheduled(
                 db: env.DB,
                 supabaseUrl: env.SUPABASE_URL,
                 supabaseKey: env.SUPABASE_ANON_KEY,
-                firecrawlUrl: env.FIRECRAWL_URL,
-                firecrawlApiKey: env.FIRECRAWL_API_KEY,
               },
               env.GEMINI_API_KEY,
             );
@@ -408,8 +409,6 @@ export async function handleManualTriggers(env: Env): Promise<void> {
                 db: env.DB,
                 supabaseUrl: env.SUPABASE_URL,
                 supabaseKey: env.SUPABASE_ANON_KEY,
-                firecrawlUrl: env.FIRECRAWL_URL,
-                firecrawlApiKey: env.FIRECRAWL_API_KEY,
               },
               env.GEMINI_API_KEY,
             );

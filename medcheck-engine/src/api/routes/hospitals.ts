@@ -311,6 +311,212 @@ hospitalRoutes.post('/analyze-url', async (c) => {
   }
 });
 
+// POST /v1/analyze-from-scv - scv_crawl_pages 기반 분석 (Phase 2-B)
+//
+// madmedscv가 크롤링한 데이터(scv_crawl_pages)를 읽어서
+// URL 재방문 없이 Rule-First 파이프라인을 실행합니다.
+//
+// Request: { hospitalId: string, hospitalName?: string }
+// → Supabase scv_crawl_pages에서 해당 hospital_id의 모든 페이지 markdown을 조합
+// → violationDetector.analyze() 실행
+// → classifyAnalysisResults() → 필요시 AI 보강
+hospitalRoutes.post('/analyze-from-scv', async (c) => {
+  try {
+    const { hospitalId, hospitalName } = await c.req.json();
+
+    if (!hospitalId) {
+      return c.json({ success: false, error: { code: 'INVALID_INPUT', message: 'hospitalId 필드는 필수입니다.' } }, 400);
+    }
+
+    const supabaseUrl = c.env.SUPABASE_URL;
+    const supabaseKey = c.env.SUPABASE_ANON_KEY;
+    if (!supabaseUrl || !supabaseKey) {
+      return c.json({ success: false, error: { code: 'CONFIG_ERROR', message: 'Supabase 설정이 없습니다.' } }, 500);
+    }
+
+    const startTime = Date.now();
+    const geminiApiKey = c.env.GEMINI_API_KEY;
+
+    // ━━━━ Step 1: scv_crawl_pages에서 크롤링 데이터 로드 ━━━━
+    const pagesRes = await fetch(
+      `${supabaseUrl}/rest/v1/scv_crawl_pages?hospital_id=eq.${encodeURIComponent(hospitalId)}&select=url,page_type,markdown,char_count,crawled_at&order=char_count.desc`,
+      {
+        headers: {
+          apikey: supabaseKey,
+          Authorization: `Bearer ${supabaseKey}`,
+        },
+      },
+    );
+
+    if (!pagesRes.ok) {
+      return c.json({ success: false, error: { code: 'SCV_FETCH_ERROR', message: `scv_crawl_pages 조회 실패: ${pagesRes.status}` } }, 500);
+    }
+
+    const pages = (await pagesRes.json()) as Array<{
+      url: string;
+      page_type: string;
+      markdown: string;
+      char_count: number;
+      crawled_at: string;
+    }>;
+
+    if (!pages.length) {
+      return c.json({
+        success: false,
+        error: { code: 'NO_SCV_DATA', message: `hospital_id=${hospitalId}에 대한 크롤링 데이터가 없습니다. madmedscv로 먼저 크롤링하세요.` },
+      }, 404);
+    }
+
+    // 모든 페이지 markdown 결합 (50,000자 제한)
+    let combinedText = '';
+    const pagesSummary: Array<{ url: string; pageType: string; chars: number }> = [];
+    for (const page of pages) {
+      if (!page.markdown) continue;
+      const remaining = 50000 - combinedText.length;
+      if (remaining <= 0) break;
+      const chunk = page.markdown.substring(0, remaining);
+      combinedText += chunk + '\n\n';
+      pagesSummary.push({ url: page.url, pageType: page.page_type, chars: chunk.length });
+    }
+
+    combinedText = combinedText.trim();
+    if (combinedText.length < 10) {
+      return c.json({ success: false, error: { code: 'EMPTY_CONTENT', message: '크롤링된 텍스트가 부족합니다.' } }, 400);
+    }
+
+    const fetchTimeMs = Date.now() - startTime;
+    const primaryUrl = pages[0]?.url || '';
+
+    // ━━━━ Step 2: Rule Engine 실행 ━━━━
+    const ruleResult = violationDetector.analyze({ text: combinedText, url: primaryUrl });
+    const ruleTimeMs = Date.now() - startTime - fetchTimeMs;
+
+    // ━━━━ Step 3: 분류 ━━━━
+    const classification = classifyAnalysisResults(ruleResult.judgment.violations);
+
+    // ━━━━ Step 4: AMBIGUOUS + Gemini → AI 보강 ━━━━
+    let finalViolations = classification.violations;
+    let determination: Determination = classification.determination;
+    let analysisMode: DetectionSource = 'rule_only';
+    let geminiMeta: Record<string, unknown> = {};
+
+    if (classification.needsAI && geminiApiKey) {
+      try {
+        const geminiResult: GeminiPipelineResult = await runGeminiPipeline(
+          {
+            url: primaryUrl,
+            hospitalId: String(hospitalId),
+            hospitalName,
+            db: c.env.DB,
+            supabaseUrl,
+            supabaseKey,
+          },
+          geminiApiKey,
+        );
+
+        if (geminiResult.success && geminiResult.audit) {
+          const audit = geminiResult.audit;
+          const aiViolations: ViolationResult[] = audit.finalViolations.map((v) => ({
+            type: v.category as ViolationResult['type'],
+            status: (v.confidence >= 0.8 ? 'likely' : 'possible') as ViolationResult['status'],
+            severity: (v.adjustedSeverity || v.severity) as ViolationResult['severity'],
+            matchedText: v.originalText,
+            description: v.category,
+            legalBasis: v.patternId ? [{ law: '의료법', article: v.patternId, description: v.reasoning || v.category }] : [],
+            confidence: v.confidence,
+            patternId: v.patternId,
+          }));
+
+          const merged = mergeRuleAndAIResults(classification.violations, aiViolations, classification.determination);
+          finalViolations = merged.violations;
+          determination = merged.determination;
+          analysisMode = 'rule_and_ai';
+          geminiMeta = {
+            geminiTimeMs: geminiResult.meta.geminiTimeMs,
+            auditTimeMs: geminiResult.meta.auditTimeMs,
+            crawlMethod: geminiResult.meta.crawlMethod,
+          };
+        }
+      } catch (geminiError: unknown) {
+        console.warn(`[analyze-from-scv] Gemini 보강 실패: ${geminiError instanceof Error ? geminiError.message : String(geminiError)}`);
+      }
+    }
+
+    // ━━━━ Step 5: Supabase 저장 ━━━━
+    const processingTimeMs = Date.now() - startTime;
+    const avgCompositeConfidence =
+      finalViolations.length > 0
+        ? finalViolations.reduce((sum, v) => sum + (v.compositeConfidence ?? v.confidence), 0) / finalViolations.length
+        : classification.avgConfidence;
+
+    let saved = false;
+    const severities = finalViolations.reduce(
+      (acc: { critical: number; major: number; minor: number }, v: { severity: string }) => {
+        if (v.severity === 'critical' || v.severity === 'high') acc.critical++;
+        else if (v.severity === 'medium' || v.severity === 'major') acc.major++;
+        else acc.minor++;
+        return acc;
+      },
+      { critical: 0, major: 0, minor: 0 },
+    );
+    const saveResult = await saveCheckViolationResult(
+      supabaseUrl, supabaseKey,
+      {
+        hospital_id: String(hospitalId),
+        hospital_name: hospitalName,
+        url: primaryUrl,
+        grade: ruleResult.judgment.score.grade,
+        clean_score: ruleResult.judgment.score.cleanScore ?? ruleResult.judgment.score.complianceRate ?? 0,
+        violation_count: finalViolations.length,
+        critical_count: severities.critical,
+        major_count: severities.major,
+        minor_count: severities.minor,
+        violations: finalViolations,
+        analysis_mode: analysisMode,
+        processing_time_ms: processingTimeMs,
+      },
+    );
+    saved = saveResult.saved;
+
+    // ━━━━ Step 6: 응답 ━━━━
+    return c.json({
+      success: true,
+      data: {
+        analysisId: ruleResult.id,
+        source: 'scv_crawl_pages',
+        hospitalId,
+        hospitalName,
+        pagesAnalyzed: pagesSummary.length,
+        pagesSummary,
+        inputLength: combinedText.length,
+        violationCount: finalViolations.length,
+        violations: finalViolations,
+        score: ruleResult.judgment.score,
+        grade: ruleResult.judgment.score.grade,
+        gradeDescription: ruleResult.judgment.score.gradeDescription,
+        summary: ruleResult.judgment.summary,
+        recommendations: ruleResult.judgment.recommendations,
+        analysisMode,
+        processingTimeMs,
+        analyzedAt: ruleResult.judgment.analyzedAt.toISOString(),
+        saved,
+        determination,
+        compositeConfidence: avgCompositeConfidence,
+        ruleClassification: classification.determination,
+        aiInvoked: analysisMode === 'rule_and_ai',
+        ...(analysisMode === 'rule_and_ai' ? geminiMeta : {}),
+        meta: {
+          fetchTimeMs,
+          ruleTimeMs,
+          ...(geminiMeta.geminiTimeMs !== undefined ? geminiMeta : {}),
+        },
+      },
+    });
+  } catch (error: unknown) {
+    return c.json({ success: false, error: { code: 'ANALYSIS_ERROR', message: error instanceof Error ? error.message : String(error) } }, 500);
+  }
+});
+
 // POST - 병원 배치 분석
 hospitalRoutes.post('/collected-hospitals/analyze', async (c) => {
   try {

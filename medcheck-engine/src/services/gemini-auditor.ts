@@ -191,17 +191,71 @@ export class GeminiAuditor {
     ];
     const CERT_WORDS = ['인증', '승인', '허가', '등록', 'approved', 'cleared', 'certified'];
 
+    // 법적 문서 키워드 (개인정보처리방침 등)
+    const LEGAL_DOC_KEYWORDS = [
+      '개인정보처리방침', '개인정보 처리방침', '개인정보 수집',
+      '이용약관', '서비스이용약관', '개인정보 보호',
+      '개인정보의 수집', '개인정보 제3자', '개인정보 위탁',
+      '정보주체', '정보통신망', '전자상거래',
+    ];
+
+    // 서비스 안내 맥락 키워드 (처방전 발급, 건강보험증 등)
+    const SERVICE_CONTEXT_KEYWORDS = [
+      '처방전 보내기', '전자처방전', '처방전 출력', '약국제출용',
+      '건강보험증', 'QR출입증', '오픈카드',
+      '카드결제', '결제 승인', '산정특례', '장애인증명서',
+      '요양급여비용', '국민건강보험법',
+      '연말정산', '원무팀', '자동발급', '발급서비스',
+      '증명서', '제증명',
+    ];
+
+    // 방송/프로그램 제목 패턴
+    const BROADCAST_PATTERN = /\[(?:EBS|KBS|MBC|SBS|JTBC|tvN|TV조선|채널A|MBN)\]\s*\[/i;
+
     return violations.filter(v => {
-      // P-56-11 계열 (인증과장) 또는 원문에 "인증"/"승인" 포함
       const text = (v.originalText || '').toLowerCase();
       const context = (v.context || '').toLowerCase();
       const combined = text + ' ' + context;
 
-      // 인증/승인 관련 위반인지 확인
-      const hasCertWord = CERT_WORDS.some(w => text.includes(w));
-      if (!hasCertWord) return true; // 인증/승인 관련 아니면 유지
+      // ① 방송 프로그램 제목 인용 체크 (예: [EBS] [명의])
+      if (BROADCAST_PATTERN.test(v.context || '')) {
+        issues.push({
+          type: 'CERTIFICATION_FALSE_POSITIVE',
+          action: 'REMOVE',
+          detail: `방송 프로그램 제목 인용 오탐: ${v.patternId} "${(v.originalText || '').substring(0, 40)}"`,
+          originalViolation: v,
+        });
+        return false;
+      }
 
-      // 공인 기관명이 컨텍스트에 포함되면 오탐
+      // ② 법적 문서 맥락 체크 (개인정보처리방침 내 "인증", "승인", "비용 청구" 등)
+      const isLegalDocContext = LEGAL_DOC_KEYWORDS.some(kw => combined.includes(kw));
+      if (isLegalDocContext) {
+        issues.push({
+          type: 'CERTIFICATION_FALSE_POSITIVE',
+          action: 'REMOVE',
+          detail: `법적 문서 맥락 오탐: ${v.patternId} "${(v.originalText || '').substring(0, 40)}"`,
+          originalViolation: v,
+        });
+        return false;
+      }
+
+      // ③ 서비스 안내 맥락 체크 (처방전 발급, 건강보험증 메뉴 등)
+      const isServiceContext = SERVICE_CONTEXT_KEYWORDS.some(kw => combined.includes(kw));
+      if (isServiceContext) {
+        issues.push({
+          type: 'CERTIFICATION_FALSE_POSITIVE',
+          action: 'REMOVE',
+          detail: `서비스 안내 맥락 오탐: ${v.patternId} "${(v.originalText || '').substring(0, 40)}"`,
+          originalViolation: v,
+        });
+        return false;
+      }
+
+      // ④ 기존: 인증/승인 관련 + 공인 기관 체크
+      const hasCertWord = CERT_WORDS.some(w => text.includes(w));
+      if (!hasCertWord) return true;
+
       const hasOfficialOrg = CERT_ORGS.some(org => combined.includes(org));
       if (hasOfficialOrg) {
         issues.push({

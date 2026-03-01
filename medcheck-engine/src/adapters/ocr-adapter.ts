@@ -1,242 +1,46 @@
 /**
  * OCR 어댑터
  * Gemini Flash 기반 이미지 텍스트 추출 및 의료광고 분석
+ *
+ * NOTE: OCR 처리는 향후 madmedscv로 완전 이관 예정.
+ * 현재는 analyze-url 엔드포인트에서 이미지 분석용으로 사용 중.
+ * 타입 정의는 src/types/ocr-types.ts로 분리됨.
  */
 
 import type { ModuleInput } from '../types';
 
-// ============================================
-// 이미지 분류 타입 정의
-// ============================================
+// 타입은 ocr-types.ts에서 re-export
+export type {
+  ImageClassificationType,
+  ImageClassification,
+  PriceType,
+  ExtractedPrice,
+  ImageViolation,
+  VisualEmphasis,
+  PriceAdValidation,
+  OCRResult,
+  OCRTextRegion,
+  OCROptions,
+  IOCRClient,
+  OCRSummary,
+} from '../types/ocr-types';
 
-/**
- * 이미지 분류 타입
- */
-export type ImageClassificationType =
-  | 'PRICE_MENU'      // 가격표/메뉴판
-  | 'EVENT'           // 이벤트/할인 배너
-  | 'PROMOTION'       // 프로모션/특가
-  | 'NOTICE'          // 공지사항
-  | 'BEFORE_AFTER'    // 전후사진
-  | 'REVIEW'          // 후기/체험기
-  | 'IRRELEVANT';     // 분석 불필요 (로고, 지도 등)
-
-/**
- * 이미지 분류 결과
- */
-export interface ImageClassification {
-  /** 분류 타입 */
-  type: ImageClassificationType;
-  /** 분류 신뢰도 (0-1) */
-  confidence: number;
-  /** 분류 사유 */
-  reason: string;
-}
-
-// ============================================
-// 가격 추출 타입 정의
-// ============================================
-
-/**
- * 가격 유형
- */
-export type PriceType =
-  | 'FIXED'        // 고정가 (예: 100,000원)
-  | 'FROM'         // ~부터 (예: 50,000원~)
-  | 'RANGE'        // 범위 (예: 50,000~100,000원)
-  | 'DISCOUNTED'   // 할인가 (정가 대비)
-  | 'NEGOTIABLE';  // 상담 후 결정
-
-/**
- * 추출된 가격 정보
- */
-export interface ExtractedPrice {
-  /** 시술명 (원본) */
-  procedureName: string;
-  /** 정규화된 시술명 */
-  normalizedProcedure?: string;
-  /** 가격 (원) */
-  price: number;
-  /** 원가격 (할인 전, 있는 경우) */
-  originalPrice?: number;
-  /** 할인율 (%) */
-  discountRate?: number;
-  /** 샷/회 수 (해당시) */
-  shots?: number;
-  /** 부위 (해당시) */
-  area?: string;
-  /** 가격 유형 */
-  priceType: PriceType;
-  /** 원본 텍스트 */
-  originalText: string;
-  /** 추출 신뢰도 (0-1) */
-  confidence: number;
-  /** 단위당 가격 계산값 */
-  pricePerUnit?: number;
-  /** 이벤트/프로모션 여부 */
-  isPromotion?: boolean;
-  /** 기간 한정 여부 */
-  hasTimeLimit?: boolean;
-  /** 조건 텍스트 (예: "첫 방문 한정") */
-  conditions?: string;
-}
-
-// ============================================
-// 위반 탐지 타입 정의
-// ============================================
-
-/**
- * 이미지에서 탐지된 위반
- */
-export interface ImageViolation {
-  /** 위반 유형 */
-  type: 'BEFORE_AFTER' | 'GUARANTEE' | 'EXAGGERATION' | 'PRICE_INDUCEMENT' | 'TESTIMONIAL' | 'OTHER';
-  /** 관련 텍스트 */
-  text: string;
-  /** 심각도 */
-  severity: 'critical' | 'major' | 'minor';
-  /** 위반 설명 */
-  description: string;
-  /** 법적 근거 */
-  legalBasis?: string;
-  /** 신뢰도 */
-  confidence: number;
-}
-
-// ============================================
-// 시각적 강조 분석 타입
-// ============================================
-
-/**
- * 시각적 강조 요소 분석
- */
-export interface VisualEmphasis {
-  /** 큰 폰트 사용 여부 */
-  hasLargeFont: boolean;
-  /** 강조 색상 사용 여부 (빨강, 노랑 등) */
-  hasEmphasisColor: boolean;
-  /** 특수 효과 사용 여부 (번쩍임, 폭발 효과 등) */
-  hasSpecialEffects: boolean;
-  /** 할인 강조 표시 여부 */
-  hasDiscountHighlight: boolean;
-  /** 긴급성 표시 여부 ("한정", "마감임박" 등) */
-  hasUrgencyIndicator: boolean;
-  /** 강조 요소 설명 */
-  emphasisDescription?: string;
-}
-
-// ============================================
-// 가격 광고 규정 검증 결과
-// ============================================
-
-/**
- * 가격 광고 규정 검증 결과
- */
-export interface PriceAdValidation {
-  /** 규정 준수 여부 */
-  isCompliant: boolean;
-  /** 위반 항목들 */
-  violations: Array<{
-    /** 규정 코드 */
-    ruleCode: string;
-    /** 규정 설명 */
-    ruleName: string;
-    /** 위반 내용 */
-    description: string;
-    /** 심각도 */
-    severity: 'critical' | 'major' | 'minor';
-  }>;
-  /** 검증 요약 */
-  summary: string;
-}
-
-// ============================================
-// OCR 기본 인터페이스
-// ============================================
-
-/**
- * OCR 추출 결과
- */
-export interface OCRResult {
-  /** 원본 이미지 URL */
-  imageUrl: string;
-  /** 추출된 텍스트 */
-  text: string;
-  /** 신뢰도 (0-1) */
-  confidence: number;
-  /** 언어 */
-  language?: string;
-  /** 텍스트 영역 목록 */
-  regions?: OCRTextRegion[];
-  /** 처리 시간 (ms) */
-  processingTime?: number;
-  /** 오류 메시지 */
-  error?: string;
-  /** 이미지 분류 결과 */
-  classification?: ImageClassification;
-  /** 추출된 가격 정보 */
-  extractedPrices?: ExtractedPrice[];
-  /** 탐지된 위반 */
-  violations?: ImageViolation[];
-  /** 시각적 강조 분석 */
-  visualEmphasis?: VisualEmphasis;
-  /** 가격 광고 규정 검증 */
-  priceAdValidation?: PriceAdValidation;
-}
-
-/**
- * OCR 텍스트 영역
- */
-export interface OCRTextRegion {
-  /** 텍스트 */
-  text: string;
-  /** 영역 좌표 */
-  boundingBox: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-  /** 신뢰도 */
-  confidence: number;
-}
-
-/**
- * OCR 옵션
- */
-export interface OCROptions {
-  /** 언어 힌트 */
-  language?: string | string[];
-  /** 이미지 전처리 */
-  preprocess?: boolean;
-  /** 최소 신뢰도 임계값 */
-  minConfidence?: number;
-  /** 타임아웃 (ms) */
-  timeout?: number;
-  /** 가격 추출 활성화 */
-  extractPrices?: boolean;
-  /** 위반 탐지 활성화 */
-  detectViolations?: boolean;
-  /** 시각적 강조 분석 활성화 */
-  analyzeVisualEmphasis?: boolean;
-  /** 가격 광고 규정 검증 활성화 */
-  validatePriceAd?: boolean;
-}
-
-/**
- * OCR 클라이언트 인터페이스
- */
-export interface IOCRClient {
-  /** 단일 이미지 OCR */
-  extract(imageUrl: string, options?: OCROptions): Promise<OCRResult>;
-  /** 여러 이미지 일괄 OCR */
-  extractBatch(imageUrls: string[], options?: OCROptions): Promise<OCRResult[]>;
-  /** 지원 언어 목록 */
-  getSupportedLanguages?(): Promise<string[]>;
-}
+import type {
+  ImageClassification,
+  ExtractedPrice,
+  ImageViolation,
+  VisualEmphasis,
+  PriceAdValidation,
+  OCRResult,
+  OCRTextRegion,
+  OCROptions,
+  IOCRClient,
+  OCRSummary,
+} from '../types/ocr-types';
 
 // ============================================
 // Gemini Flash OCR 클라이언트
+// TODO: 향후 madmedscv로 이관 예정
 // ============================================
 
 /**
@@ -987,58 +791,6 @@ export interface OCRSummary {
 }
 
 /**
- * Mock OCR 클라이언트 (테스트/개발용)
- */
-export class MockOCRClient implements IOCRClient {
-  async extract(imageUrl: string): Promise<OCRResult> {
-    // 시뮬레이션 지연
-    await new Promise(resolve => setTimeout(resolve, 100));
-
-    return {
-      imageUrl,
-      text: `[Mock OCR] 이미지에서 추출된 텍스트입니다. URL: ${imageUrl}`,
-      confidence: 0.95,
-      language: 'ko',
-      processingTime: 100,
-      classification: {
-        type: 'PRICE_MENU',
-        confidence: 0.9,
-        reason: 'Mock classification',
-      },
-      extractedPrices: [
-        {
-          procedureName: '울쎄라 리프팅',
-          price: 500000,
-          shots: 300,
-          priceType: 'FIXED',
-          originalText: '울쎄라 300샷 50만원',
-          confidence: 0.9,
-          pricePerUnit: 1667,
-        },
-      ],
-    };
-  }
-
-  async extractBatch(imageUrls: string[]): Promise<OCRResult[]> {
-    return Promise.all(imageUrls.map(url => this.extract(url)));
-  }
-
-  async getSupportedLanguages(): Promise<string[]> {
-    return ['ko', 'en', 'ja', 'zh'];
-  }
-}
-
-/**
  * 기본 OCR 어댑터 인스턴스
  */
 export const ocrAdapter = new OCRAdapter();
-
-/**
- * Gemini Flash OCR 클라이언트 팩토리
- */
-export function createGeminiFlashClient(apiKey: string, options?: Partial<GeminiFlashConfig>): GeminiFlashOCRClient {
-  return new GeminiFlashOCRClient({
-    apiKey,
-    ...options,
-  });
-}

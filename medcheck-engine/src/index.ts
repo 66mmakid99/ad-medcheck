@@ -303,8 +303,6 @@ app.post('/v1/cross-intel/sync-medcheck', async (c) => {
         supabaseUrl,
         supabaseKey,
         db: c.env.DB,
-        firecrawlUrl: c.env.FIRECRAWL_URL,
-        firecrawlApiKey: c.env.FIRECRAWL_API_KEY,
       },
       apiKey,
     );
@@ -525,8 +523,6 @@ app.post('/v1/report/generate', async (c) => {
         supabaseUrl: c.env.SUPABASE_URL,
         supabaseKey: c.env.SUPABASE_ANON_KEY,
         db: c.env.DB,
-        firecrawlUrl: c.env.FIRECRAWL_URL,
-        firecrawlApiKey: c.env.FIRECRAWL_API_KEY,
       },
       apiKey,
     );
@@ -575,8 +571,6 @@ app.post('/v1/cold-email/generate', async (c) => {
         supabaseUrl: c.env.SUPABASE_URL,
         supabaseKey: c.env.SUPABASE_ANON_KEY,
         db: c.env.DB,
-        firecrawlUrl: c.env.FIRECRAWL_URL,
-        firecrawlApiKey: c.env.FIRECRAWL_API_KEY,
       },
       apiKey,
     );
@@ -643,8 +637,6 @@ app.post('/v1/pipeline/analyze', async (c) => {
           supabaseUrl: c.env.SUPABASE_URL,
           supabaseKey: c.env.SUPABASE_ANON_KEY,
           db: c.env.DB,
-          firecrawlUrl: c.env.FIRECRAWL_URL,
-          firecrawlApiKey: c.env.FIRECRAWL_API_KEY,
         },
         apiKey,
       );

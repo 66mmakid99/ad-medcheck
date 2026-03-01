@@ -1,12 +1,14 @@
 /**
- * 통합 분석 파이프라인 (Analysis Pipeline) v2.1
- * 
+ * 통합 분석 파이프라인 (Analysis Pipeline) v2.2
+ *
+ * 역할: madmedcheck Phase 2 — 위반 분석 전담
+ *   - 텍스트 파싱 → Gemini AI 분석 → 규칙엔진 감사 → 등급 산정
+ *   - 크롤링/OCR은 madmedscv(Phase 1)가 담당, crawlData로 주입받음
+ *   - analyze-url 엔드포인트 경유 시 기본 fetch만 수행 (정적 사이트)
+ *
+ * [v2.2 변경] Firecrawl 크롤링 로직 삭제 (madmedscv로 이관)
  * [v2.1 변경] 오탐 후처리 추가
- * - 병원명 포함 키워드 오탐 제거 ("뷰티스킨피부과"에서 "피부과" 위반 제거)
- * - 같은 패턴 ID 중복 제거 (30회 반복 → 1건으로)
- * - 네비게이션 반복 텍스트 필터링
- * - 후처리 후 점수 재계산
- * 
+ *
  * 위치: src/services/analysis-pipeline.ts
  */
 
@@ -548,10 +550,7 @@ export interface GeminiPipelineInput {
   supabaseKey?: string;
   /** D1 DB (Phase 6: Flywheel 수집) */
   db?: any;
-  /** Firecrawl Self-hosted URL (SPA fallback) */
-  firecrawlUrl?: string;
-  /** Firecrawl API Key */
-  firecrawlApiKey?: string;
+  // NOTE: Firecrawl 크롤링은 madmedscv로 이관됨. SPA 사이트는 crawlData로 주입.
 }
 
 export interface GeminiPipelineResult {
@@ -631,19 +630,21 @@ export async function runGeminiPipeline(
       }
     }
 
-    // ━━━━ Step 1: 텍스트 가져오기 (crawlData → Supabase 캐시 → fetch → Firecrawl fallback) ━━━━
+    // ━━━━ Step 1: 텍스트 가져오기 (crawlData → Supabase 캐시 → fetch) ━━━━
+    // NOTE: SPA 사이트 크롤링(Firecrawl/Puppeteer)은 madmedscv가 담당.
+    //       madmedcheck는 crawlData 주입 또는 기본 fetch만 수행.
     let text: string;
     let images: { base64: string; mimeType: string }[] | undefined;
     let crawlMethod: string = 'fetch';
-    let firecrawlDebug = '';
 
     if (input.crawlData) {
+      // madmedscv 등 외부에서 크롤링 완료된 데이터 주입
       text = input.crawlData.text;
       images = input.crawlData.images;
       meta.fetchTimeMs = 0;
       crawlMethod = 'crawlData';
     } else {
-      // Phase 4: MADMEDSALES 크롤링 캐시 확인
+      // Supabase 크롤링 캐시 확인
       let cachedText: string | null = null;
       if (input.supabaseUrl && input.supabaseKey) {
         try {
@@ -655,7 +656,7 @@ export async function runGeminiPipeline(
             console.log(`[GeminiPipeline] CrossIntel: using cached crawl (${cachedText.length} chars)`);
           }
         } catch {
-          // 캐시 없으면 직접 크롤링
+          // 캐시 없으면 직접 fetch
         }
       }
 
@@ -663,98 +664,32 @@ export async function runGeminiPipeline(
         text = cachedText;
         meta.fetchTimeMs = 0;
       } else {
-        // 1차: 기본 fetch
+        // 기본 fetch (정적 사이트 대응)
         const fetchStart = Date.now();
         try {
-          const fetchResult = await fetchWithEncoding(input.url, input.firecrawlUrl ? 10000 : 25000);
+          const fetchResult = await fetchWithEncoding(input.url, 25000);
           text = extractTextFromHtml(fetchResult.html);
           meta.fetchTimeMs = Date.now() - fetchStart;
           crawlMethod = 'fetch';
         } catch (fetchError) {
           meta.fetchTimeMs = Date.now() - fetchStart;
-          // fetch 자체가 실패해도 Firecrawl fallback 시도
           text = '';
           crawlMethod = 'fetch_failed';
           console.warn(`[GeminiPipeline] Basic fetch failed: ${(fetchError as Error).message}`);
         }
 
-        // 2차: Firecrawl fallback (텍스트 200자 미만이면 SPA 가능성)
-        if (text.length < 200 && input.firecrawlUrl && input.firecrawlApiKey) {
-          console.log(`[GeminiPipeline] Basic fetch got ${text.length} chars, falling back to Firecrawl`);
-          firecrawlDebug = `firecrawlUrl=${input.firecrawlUrl}`;
-          const fcStart = Date.now();
-          try {
-            const fcResponse = await fetch(`${input.firecrawlUrl}/v1/scrape`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${input.firecrawlApiKey}`,
-              },
-              body: JSON.stringify({
-                url: input.url,
-                formats: ['markdown'],
-                waitFor: 3000,
-              }),
-              signal: AbortSignal.timeout(25000),
-            });
-
-            firecrawlDebug += `, status=${fcResponse.status}`;
-
-            if (fcResponse.ok) {
-              const fcData: any = await fcResponse.json();
-              const fcMarkdown = fcData?.data?.markdown || '';
-              const fcHtml = fcData?.data?.html || '';
-
-              firecrawlDebug += `, markdown=${fcMarkdown.length}chars, html=${fcHtml.length}chars`;
-
-              // markdown에서 이미지 URL, 링크 구문 등 불필요한 요소 제거 → 순수 텍스트 추출
-              const cleanedMarkdown = fcMarkdown
-                .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')   // ![alt](url) → alt만 남김
-                .replace(/\[([^\]]*)\]\([^)]+\)/g, '$1')    // [text](url) → text만 남김
-                .replace(/https?:\/\/[^\s)]+/g, '')          // 남은 URL 제거
-                .replace(/\n{3,}/g, '\n\n')                  // 과도한 줄바꿈 정리
-                .trim();
-
-              if (cleanedMarkdown.length >= 50) {
-                text = cleanedMarkdown.substring(0, 15000);
-                crawlMethod = 'firecrawl';
-              } else if (fcHtml.length >= 50) {
-                text = extractTextFromHtml(fcHtml);
-                crawlMethod = 'firecrawl';
-              }
-
-              console.log(`[GeminiPipeline] Firecrawl got ${text.length} chars (method: ${crawlMethod})`);
-            } else {
-              const errBody = await fcResponse.text().catch(() => '');
-              firecrawlDebug += `, errBody=${errBody.substring(0, 200)}`;
-              console.warn(`[GeminiPipeline] Firecrawl returned HTTP ${fcResponse.status}: ${errBody.substring(0, 200)}`);
-            }
-
-            meta.fetchTimeMs += Date.now() - fcStart;
-          } catch (fcError) {
-            meta.fetchTimeMs += Date.now() - fcStart;
-            firecrawlDebug += `, error=${(fcError as Error).message}`;
-            console.warn(`[GeminiPipeline] Firecrawl fallback failed: ${(fcError as Error).message}`);
-          }
-        } else if (text.length < 200) {
-          firecrawlDebug = `firecrawlUrl=${input.firecrawlUrl ? 'set' : 'NOT_SET'}, apiKey=${input.firecrawlApiKey ? 'set' : 'NOT_SET'}`;
-        }
-
-        // fetch도 Firecrawl도 실패한 경우
-        if (text.length < 200 && crawlMethod !== 'firecrawl') {
-          // Firecrawl 미설정인데 SPA인 경우 안내
-          if (!input.firecrawlUrl && text.length < 50) {
-            meta.totalTimeMs = Date.now() - startTime;
-            meta.crawlMethod = 'fetch_only';
-            return {
-              success: false,
-              meta,
-              error: {
-                code: 'SPA_NO_FIRECRAWL',
-                message: `텍스트가 ${text.length}자만 추출됨 (SPA 사이트 가능성). Firecrawl 설정이 없어 fallback 불가.`,
-              },
-            };
-          }
+        // SPA 사이트로 텍스트가 부족한 경우
+        if (text.length < 50) {
+          meta.totalTimeMs = Date.now() - startTime;
+          meta.crawlMethod = crawlMethod;
+          return {
+            success: false,
+            meta,
+            error: {
+              code: 'SPA_NEEDS_CRAWLER',
+              message: `텍스트가 ${text.length}자만 추출됨 (SPA 사이트 가능성). madmedscv 크롤러를 통해 crawlData를 주입하세요.`,
+            },
+          };
         }
       }
     }
@@ -767,7 +702,7 @@ export async function runGeminiPipeline(
       return {
         success: false,
         meta,
-        error: { code: 'NO_CONTENT', message: `텍스트가 너무 짧습니다 (${text.length}자). crawlMethod: ${crawlMethod}`, firecrawlDebug },
+        error: { code: 'NO_CONTENT', message: `텍스트가 너무 짧습니다 (${text.length}자). crawlMethod: ${crawlMethod}` },
       };
     }
 

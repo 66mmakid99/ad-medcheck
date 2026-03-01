@@ -20,10 +20,7 @@ export type Env = {
   SUPABASE_URL?: string;
   /** Supabase Anon Key */
   SUPABASE_ANON_KEY?: string;
-  /** Firecrawl Self-hosted URL (Contabo VPS) */
-  FIRECRAWL_URL?: string;
-  /** Firecrawl API Key */
-  FIRECRAWL_API_KEY?: string;
+  // NOTE: Firecrawl 크롤링은 madmedscv로 이관됨
 };
 
 export type AppBindings = { Bindings: Env };

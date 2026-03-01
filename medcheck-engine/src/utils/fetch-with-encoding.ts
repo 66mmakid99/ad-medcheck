@@ -1,11 +1,12 @@
 /**
  * fetchWithEncoding — 한국 사이트 인코딩 자동 감지 fetch
- * 
- * 파일 위치: medcheck-engine/src/utils/fetch-with-encoding.ts (신규)
- * 
+ *
+ * TODO: 향후 madmedscv로 이관 검토.
+ *       현재는 analyze-url 엔드포인트 + Cron 크롤러에서 사용 중.
+ *
  * 문제: 한국 병원 사이트 60~70%가 EUC-KR 인코딩
  *       response.text()는 UTF-8만 가정 → 한글 깨짐
- * 
+ *
  * 해결: ArrayBuffer로 받은 뒤 charset 감지 → 올바른 TextDecoder 사용
  */
 

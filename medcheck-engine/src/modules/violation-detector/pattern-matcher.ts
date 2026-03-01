@@ -55,6 +55,25 @@ const NEGATIVE_LIST: Record<string, string[]> = {
     '전문의', '원장', '대표원장', '부원장',
     '사업자등록번호', '의료기관번호',
   ],
+
+  // 공인 기관 인증/승인 (pattern-loader.ts와 동기화)
+  certifications: [
+    'FDA 승인', 'FDA 인증', 'FDA approved', 'FDA cleared',
+    'CE 인증', 'CE 마크', 'CE marking',
+    '식약처 인증', '식약처 승인', '식약처 허가', '식약처 등록',
+    'MFDS 승인', 'KFDA 승인',
+    'ISO 인증', 'ISO 13485',
+    'GMP 인증', 'CGMP',
+    '의료기기 허가', '의료기기 인증', '의료기기 승인',
+    '특허', '특허 등록', '특허 취득',
+    'TFDA 승인', 'ANVISA 승인', 'PMDA 승인',
+  ],
+
+  // 법적 문서/서비스 안내 용어 (단독 사용 시 비위반)
+  legalDocumentTerms: [
+    '건강보험', '건강보험증', '요양급여',
+    '처방전', '전자처방전',
+  ],
 };
 
 /**
@@ -171,6 +190,27 @@ const CONTEXT_EXCEPTIONS: ContextException[] = [
     description: '조건문 또는 가정 상황',
   },
 ];
+
+// ============================================
+// 추가 오탐 방지: 법적 문서 / 방송 프로그램 맥락
+// ============================================
+
+/**
+ * 개인정보처리방침, 이용약관 등 법적 문서 내 용어 오탐 방지
+ */
+const LEGAL_DOCUMENT_INDICATORS = [
+  '개인정보처리방침', '개인정보 처리방침', '개인정보 수집',
+  '이용약관', '서비스이용약관', '개인정보 보호',
+  '개인정보의 수집', '개인정보 제3자', '개인정보 위탁',
+  '정보주체', '정보통신망', '전자상거래',
+  '산정특례', '연말정산', '장애인증명서', '제증명', '증명서 발급',
+];
+
+/**
+ * 방송/프로그램 제목 인용 패턴 (오탐 방지)
+ * [EBS] [명의], [KBS] [생로병사의 비밀] 등
+ */
+const BROADCAST_TITLE_PATTERN = /\[(?:EBS|KBS|MBC|SBS|JTBC|tvN|TV조선|채널A|MBN)\]\s*\[/;
 
 // ============================================
 // 타입 정의
@@ -350,6 +390,12 @@ export class PatternMatcher {
 
         // 컨텍스트 추출
         const context = this.extractContext(text, position, endPosition, contextLength);
+
+        // 법적 문서 맥락 체크 (개인정보처리방침/이용약관 내 용어 → 오탐)
+        if (this.isInLegalDocumentContext(text, position)) continue;
+
+        // 방송 프로그램 제목 인용 체크 ([EBS] [명의] 등 → 오탐)
+        if (this.isInBroadcastTitle(context)) continue;
 
         // 신뢰도 계산
         let confidence = this.calculateConfidence(pattern, matchedText, context);
@@ -749,6 +795,27 @@ export class PatternMatcher {
     return this.match(text, { categories: [pattern.category] }).filter(
       m => m.patternId === patternId
     );
+  }
+
+  /**
+   * 법적 문서(개인정보처리방침/이용약관) 맥락 체크
+   * 매칭 위치 주변에 법적 문서 키워드가 있으면 오탐으로 판단
+   */
+  private isInLegalDocumentContext(text: string, position: number): boolean {
+    // 매칭 위치 앞뒤 500자 범위에서 법적 문서 키워드 검색
+    const searchStart = Math.max(0, position - 500);
+    const searchEnd = Math.min(text.length, position + 500);
+    const nearbyText = text.slice(searchStart, searchEnd);
+
+    return LEGAL_DOCUMENT_INDICATORS.some(indicator => nearbyText.includes(indicator));
+  }
+
+  /**
+   * 방송 프로그램 제목 인용 체크
+   * [EBS] [명의] 같은 패턴이 컨텍스트에 있으면 오탐
+   */
+  private isInBroadcastTitle(context: string): boolean {
+    return BROADCAST_TITLE_PATTERN.test(context);
   }
 
   /**

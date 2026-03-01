@@ -3,6 +3,14 @@ import { supabaseQuery } from '../../lib/supabase';
 import GradeBadge from '../ui/GradeBadge';
 import SeverityBadge from '../ui/SeverityBadge';
 
+/** object/array를 안전하게 string으로 변환 */
+function safe(val) {
+  if (val == null) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  return JSON.stringify(val);
+}
+
 const PAGE_SIZE = 20;
 
 export default function ViolationsTab() {
@@ -119,8 +127,13 @@ export default function ViolationsTab() {
                         <td className="px-4 py-3 text-center"><GradeBadge grade={r.grade} /></td>
                         <td className="px-4 py-3 text-center text-grade-d font-medium">{r.violation_count || 0}</td>
                         <td className="px-4 py-3 text-center">
-                          <span className={`text-[11px] px-1.5 py-0.5 rounded ${r.analysis_mode === 'gemini' ? 'bg-grade-b/10 text-grade-b' : 'bg-surface text-text-muted'}`}>
-                            {r.analysis_mode || '-'}
+                          <span className={`text-[11px] px-1.5 py-0.5 rounded ${
+                            r.analysis_mode === 'rule_and_ai' ? 'bg-grade-b/10 text-grade-b' :
+                            r.analysis_mode === 'rule_only' ? 'bg-accent/10 text-accent' :
+                            r.analysis_mode === 'gemini' ? 'bg-grade-b/10 text-grade-b' :
+                            'bg-surface text-text-muted'
+                          }`}>
+                            {r.analysis_mode === 'rule_only' ? 'Rule' : r.analysis_mode === 'rule_and_ai' ? 'Rule+AI' : r.analysis_mode || '-'}
                           </span>
                         </td>
                       </tr>
@@ -193,16 +206,23 @@ export default function ViolationsTab() {
 
               {/* 메타 정보 */}
               <div className="space-y-1.5 mb-4">
-                <MetaRow label="분석 모드" value={selected.analysis_mode || '-'} />
+                <MetaRow label="분석 모드" value={
+                  selected.analysis_mode === 'rule_only' ? 'Rule Only' :
+                  selected.analysis_mode === 'rule_and_ai' ? 'Rule + AI' :
+                  selected.analysis_mode || '-'
+                } />
                 <MetaRow label="처리 시간" value={selected.processing_time_ms ? `${selected.processing_time_ms}ms` : '-'} />
                 <MetaRow label="분석 시간" value={formatTime(selected.analyzed_at)} />
               </div>
 
               {/* 위반 목록 */}
               {(() => {
-                const violations = typeof selected.violations === 'string'
-                  ? JSON.parse(selected.violations || '[]')
-                  : (selected.violations || []);
+                let violations = [];
+                try {
+                  violations = typeof selected.violations === 'string'
+                    ? JSON.parse(selected.violations || '[]')
+                    : (Array.isArray(selected.violations) ? selected.violations : []);
+                } catch { violations = []; }
                 if (!violations.length) return <p className="text-xs text-text-muted text-center py-3">위반 항목 없음</p>;
                 return (
                   <div className="space-y-2">
@@ -213,10 +233,28 @@ export default function ViolationsTab() {
                           <div className="flex items-start gap-2">
                             <SeverityBadge severity={v.severity} />
                             <div className="flex-1 min-w-0">
-                              <p className="text-xs font-medium text-text-primary">{v.description}</p>
+                              <div className="flex items-center gap-1.5">
+                                <p className="text-xs font-medium text-text-primary">{safe(v.description)}</p>
+                                {v.determination && (
+                                  <span className={`text-[9px] px-1.5 py-0 rounded-full border font-medium ${
+                                    v.determination === 'confirmed' ? 'bg-grade-d/10 text-grade-d border-grade-d/20' :
+                                    v.determination === 'ai_verified' ? 'bg-grade-b/10 text-grade-b border-grade-b/20' :
+                                    v.determination === 'hitl_required' ? 'bg-grade-d/10 text-grade-d border-grade-d/20' :
+                                    'bg-surface text-text-muted border-border'
+                                  }`}>
+                                    {v.determination === 'confirmed' ? '확정' : v.determination === 'ai_verified' ? 'AI검증' : v.determination === 'hitl_required' ? '검토필요' : v.determination}
+                                  </span>
+                                )}
+                              </div>
                               {v.matchedText && (
                                 <p className="text-[11px] text-text-muted mt-0.5">
-                                  "<span className="text-grade-d">{v.matchedText}</span>"
+                                  "<span className="text-grade-d">{safe(v.matchedText)}</span>"
+                                </p>
+                              )}
+                              {v.compositeConfidence != null && (
+                                <p className="text-[10px] text-text-muted mt-0.5">
+                                  신뢰도 {Math.round(v.compositeConfidence * 100)}%
+                                  {v.detectionSource && ` · ${v.detectionSource === 'rule_only' ? 'Rule' : v.detectionSource === 'rule_and_ai' ? 'Rule+AI' : 'AI'}`}
                                 </p>
                               )}
                             </div>

@@ -435,7 +435,7 @@
       "description": "객관적 근거 없이 최상급 표현 사용",
       "example": "최고의 의료진",
       "suggestion": "객관적 근거 제시하거나 표현 삭제",
-      "exceptions": []
+      "exceptions": ["Vol\\.?\\s*\\d+\\s*,?\\s*No\\.?\\s*\\d+", "제?\\s*\\d+\\s*호"]
     },
     {
       "id": "P-56-03-002",
@@ -621,7 +621,7 @@
       "id": "P-56-05-002",
       "category": "환자유인",
       "subcategory": "할인 과장",
-      "pattern": "(\\d{2,3}%\\s*할인|반값|무료\\s*시술|0원)",
+      "pattern": "(\\d{2,3}%\\s*할인|반값|무료\\s*시술|(?<![\\d,])0원)",
       "patternType": "regex",
       "keywords": [
         "할인",
@@ -634,7 +634,7 @@
       "description": "과도한 할인으로 환자 유인",
       "example": "50% 할인 이벤트",
       "suggestion": "할인 근거 명확히 하거나 표현 완화",
-      "exceptions": []
+      "exceptions": ["장바구니|cart|결제\\s*금액|선택\\s*시술"]
     },
     {
       "id": "P-56-05-003",
@@ -1153,7 +1153,7 @@
       "id": "P-56-13-001",
       "category": "의약품광고",
       "subcategory": "전문의약품",
-      "pattern": "(처방전|전문\\s*의약품|ETC)",
+      "pattern": "(처방전|전문\\s*의약품|(?<![=\\w/])ETC(?![\\d=&]))",
       "patternType": "regex",
       "keywords": [
         "처방전",
@@ -1558,7 +1558,7 @@
       "id": "P-56-19-005",
       "category": "꼼수패턴",
       "subcategory": "스토리 광고",
-      "pattern": "(스토리|24시간\\s*후\\s*삭제)",
+      "pattern": "((?<![가-힣])스토리|24시간\\s*후\\s*삭제)",
       "patternType": "regex",
       "keywords": [
         "스토리",
@@ -1569,7 +1569,7 @@
       "description": "임시 게시물로 심의 회피",
       "example": "스토리로만 공개",
       "suggestion": "심의 대상 내용은 영구 게시 또는 삭제",
-      "exceptions": []
+      "exceptions": ["[가-힣]스토리"]
     },
     {
       "id": "P-56-19-006",
@@ -1639,7 +1639,8 @@
       "description": "외부 링크로 위반 내용을 우회 게시",
       "example": "프로필 링크에서 전후사진 확인",
       "suggestion": "링크 대상 페이지도 의료광고 심의 준수",
-      "exceptions": []
+      "exceptions": [],
+      "enabled": false
     },
     {
       "id": "P-56-20-001",
@@ -2511,7 +2512,7 @@
       "id": "P-56-32-006",
       "category": "금지어",
       "subcategory": "명의/대가",
-      "pattern": "(명의|대가|거장|달인)",
+      "pattern": "(명의|(?<![가-힣])대가|거장|달인)",
       "patternType": "regex",
       "keywords": [
         "명의",
@@ -2524,7 +2525,7 @@
       "description": "의료인을 과도하게 미화하는 표현",
       "example": "피부과의 명의",
       "suggestion": "객관적인 자격/경력 정보로 대체",
-      "exceptions": []
+      "exceptions": ["[가-힣]대가"]
     },
     {
       "id": "P-56-32-007",

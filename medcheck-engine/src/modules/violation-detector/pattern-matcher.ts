@@ -98,7 +98,11 @@ export type ContextExceptionType =
   | 'QUOTATION'         // 인용문
   | 'LEGAL_NOTICE'      // 법적 고지
   | 'NEGATIVE_EXAMPLE'  // 부정적 예시
-  | 'CONDITIONAL';      // 조건문
+  | 'CONDITIONAL'        // 조건문
+  | 'ECOMMERCE_CONTEXT'  // 장바구니/UI 요소
+  | 'CITATION_CONTEXT'   // 학술인용
+  | 'CERTIFICATION_CONTEXT' // 인증서/승인 정당 언급
+  | 'POST_PROCEDURE_CONTEXT'; // 수술 후 안내
 
 /**
  * 맥락 예외 정의
@@ -119,6 +123,10 @@ const CONTEXT_EXCEPTIONS: ContextException[] = [
       /(?:절대|결코|전혀|도저히|절대로)\s*.{0,10}$/,
       /(?:~?하지\s*않|~?않|~?아니|~?못)\s*.{0,5}$/,
       /(?:금지|불가|불법|위반)\s*.{0,5}$/,
+      // v2.1: 강화된 부정문 변형
+      /(?:할\s*수\s*없|되지\s*않|드리지\s*않|보장하지\s*않)\s*.{0,5}$/,
+      /(?:라고\s*(?:할|말할)\s*수\s*없)\s*.{0,5}$/,
+      /(?:단정\s*지을\s*수\s*없|확신할\s*수\s*없)\s*.{0,5}$/,
     ],
     description: '앞에 부정어가 있어 위반 의도가 아님',
   },
@@ -128,6 +136,10 @@ const CONTEXT_EXCEPTIONS: ContextException[] = [
       /^.{0,10}(?:하지\s*않습니다|않습니다|아닙니다|없습니다)/,
       /^.{0,10}(?:금지|불가능|불법입니다)/,
       /^.{0,5}(?:은|는)\s*(?:아닙니다|없습니다)/,
+      // v2.1: 추가 부정 종결 어미
+      /^.{0,10}(?:이\s*아니라|가\s*아닌|을\s*하지|를\s*하지)/,
+      /^.{0,10}(?:지\s*않으며|지\s*않고|지\s*않아)/,
+      /^.{0,10}(?:이\s*없으며|이\s*없고|다고\s*보기\s*어렵)/,
     ],
     description: '뒤에 부정어가 있어 위반 의도가 아님',
   },
@@ -138,6 +150,10 @@ const CONTEXT_EXCEPTIONS: ContextException[] = [
       /(?:부작용|이상반응)\s*(?:이|가)\s*(?:있을|발생|나타날)/,
       /(?:전문의|의사)\s*(?:와|과)\s*(?:상담|상의)/,
       /(?:사전\s*)?(?:상담|검사|진단)\s*(?:이|가)\s*(?:필요|필수)/,
+      // v2.1: 추가 면책 패턴
+      /(?:체질|상태|증상)\s*(?:에\s*따라|마다)\s*(?:다를|차이)/,
+      /(?:효과|결과)\s*(?:를\s*)?(?:보장|약속)\s*(?:하지\s*않|드리지\s*않|할\s*수\s*없)/,
+      /(?:모든\s*)?(?:시술|수술|치료)\s*(?:에는|에)\s*(?:위험|부작용|주의)/,
     ],
     description: '면책조항 또는 경고문구',
   },
@@ -147,6 +163,9 @@ const CONTEXT_EXCEPTIONS: ContextException[] = [
       /^.{0,30}(?:\?|인가요|일까요|할까요|할까|인가|일까)$/,
       /(?:어떤|무엇|어떻게|왜|언제)\s*.{0,20}$/,
       /^(?:혹시|과연|정말)\s*/,
+      // v2.1: Q&A 형식 패턴
+      /^(?:Q\.|Q:|질문|문의)\s*/,
+      /(?:알고\s*싶|궁금|문의)\s*(?:합니다|해요|하세요)/,
     ],
     description: '질문 형태의 문장',
   },
@@ -157,6 +176,10 @@ const CONTEXT_EXCEPTIONS: ContextException[] = [
       /「.*」/,
       /『.*』/,
       /(?:라고|하고)\s*(?:말씀|말|언급|표현)/,
+      // v2.1: 언론/논문 인용
+      /(?:에\s*따르면|에\s*의하면|보도에\s*따르면)/,
+      /(?:연구\s*결과|논문\s*발표|학술\s*연구)\s*(?:에\s*따르면|에서)/,
+      /(?:기사|보도|뉴스)\s*(?:에서|에\s*따르면|인용)/,
     ],
     description: '다른 출처를 인용하는 문장',
   },
@@ -167,6 +190,9 @@ const CONTEXT_EXCEPTIONS: ContextException[] = [
       /(?:법률|법령|규정)\s*(?:에\s*따라|에\s*의해|상)/,
       /(?:식약처|복지부|보건복지부)\s*(?:지침|가이드|규정)/,
       /(?:허가|인가|승인)\s*(?:받은|된|사항)/,
+      // v2.1: 추가 법적 맥락
+      /(?:약사법|소비자보호|공정거래)\s*(?:제?\s*\d+|에\s*따라)/,
+      /(?:행정\s*처분|과태료|벌금)\s*(?:대상|처분|부과)/,
     ],
     description: '법적 고지 또는 규정 안내',
   },
@@ -177,6 +203,9 @@ const CONTEXT_EXCEPTIONS: ContextException[] = [
       /(?:위반\s*)?(?:사례|예시|예)(?:입니다|임|:)/,
       /(?:잘못된|불법|부당한)\s*(?:광고|표현|예시)/,
       /(?:하면\s*안|해서는\s*안|하지\s*마)/,
+      // v2.1: 교육/안내 맥락
+      /(?:주의\s*사항|유의\s*사항|참고\s*사항)(?:입니다|:)/,
+      /(?:이와\s*같은)\s*(?:표현|광고)\s*(?:은|는)\s*(?:위반|금지)/,
     ],
     description: '잘못된 예시로 제시된 경우',
   },
@@ -186,8 +215,50 @@ const CONTEXT_EXCEPTIONS: ContextException[] = [
       /(?:만약|가령|예를\s*들어|예컨대)\s*/,
       /(?:경우|상황)\s*(?:에는|에서는|라면)/,
       /(?:ㄴ다면|한다면|라면|이라면|였다면|었다면)\s/,
+      // v2.1: 가정/비교 맥락
+      /(?:일\s*수도|일\s*수\s*있으나|가능성이\s*있으나)/,
     ],
     description: '조건문 또는 가정 상황',
+  },
+  // v2.1: 장바구니/UI/가격표 요소 맥락
+  {
+    type: 'ECOMMERCE_CONTEXT',
+    patterns: [
+      /(?:장바구니|cart|총\s*\d+\s*개\s*시술|결제\s*하기|주문\s*내역|선택\s*시술)/,
+      /(?:담긴\s*시술|장바구니에|결제\s*금액|선택\s*항목)/,
+      /(?:시술선택|시술\s*선택|선택해\s*주세요)/,
+      /~[\d,]+원~\s*\*?\*?[\d,]+원/,  // 취소선가격 + 할인가격 패턴 (가격표)
+    ],
+    description: '장바구니/결제/가격표 UI 요소 내 텍스트',
+  },
+  // v2.1: 학술인용 맥락
+  {
+    type: 'CITATION_CONTEXT',
+    patterns: [
+      /Vol\.?\s*\d+\s*,?\s*No\.?\s*\d+/,
+      /(?:논문|저널|journal|PMID|et\s+al|학회|학술지|연구논문)/i,
+      /\(\d{4}\)\s*[""']/,  // (2024) "논문제목" 형식
+    ],
+    description: '학술논문 인용 맥락',
+  },
+  // v2.1: 인증서/승인 정당 언급
+  {
+    type: 'CERTIFICATION_CONTEXT',
+    patterns: [
+      /(?:FDA|KFDA|식약처|CE|ISO|MFDS)\s*(?:승인|인증|허가|등록|클리어)/,
+      /(?:의료기기\s*)?(?:허가|인증|승인)\s*(?:번호|제\s*\d+)/,
+    ],
+    description: '실제 인증 정보 기재',
+  },
+  // v2.1: 수술 후 안내 맥락
+  {
+    type: 'POST_PROCEDURE_CONTEXT',
+    patterns: [
+      /(?:수술|시술)\s*후\s*(?:관리|안내|주의|유의|회복)/,
+      /(?:관리\s*방법|주의\s*사항|회복\s*기간|사후\s*관리)/,
+      /(?:퇴원\s*후|시술\s*직후)\s*(?:안내|관리|주의)/,
+    ],
+    description: '수술/시술 후 안내문 맥락',
   },
 ];
 
@@ -293,7 +364,8 @@ export class PatternMatcher {
   private compiledPatterns: Map<string, RegExp>;
 
   constructor() {
-    this.patterns = (patternsData as { patterns: PatternDefinition[] }).patterns || [];
+    this.patterns = ((patternsData as { patterns: PatternDefinition[] }).patterns || [])
+      .filter((p: any) => p.enabled !== false);
     this.compiledPatterns = new Map();
     this.compilePatterns();
   }
@@ -320,7 +392,7 @@ export class PatternMatcher {
       caseSensitive = false,
       categories,
       minSeverity,
-      contextLength = 50,
+      contextLength = 100,
       maxMatches = 100,
       enableContextExceptionFilter = true,
       enableSentenceDedup = true,
@@ -397,6 +469,9 @@ export class PatternMatcher {
         // 방송 프로그램 제목 인용 체크 ([EBS] [명의] 등 → 오탐)
         if (this.isInBroadcastTitle(context)) continue;
 
+        // URL 파라미터/경로 내 매칭 체크 (http/https URL 안에 있으면 오탐)
+        if (this.isInsideUrl(text, position, endPosition)) continue;
+
         // 신뢰도 계산
         let confidence = this.calculateConfidence(pattern, matchedText, context);
 
@@ -424,6 +499,16 @@ export class PatternMatcher {
               exceptionCheck.type === 'NEGATION_BEFORE' || exceptionCheck.type === 'NEGATION_AFTER'
             )) {
               // 부작용부정 카테고리는 부정어 필터링 건너뜀
+            } else if (exceptionCheck.type === 'POST_PROCEDURE_CONTEXT') {
+              // 수술 후 안내문 → 완전 필터링 대신 confidence 감소
+              confidence -= 0.3;
+            } else if (
+              exceptionCheck.type === 'ECOMMERCE_CONTEXT' ||
+              exceptionCheck.type === 'CITATION_CONTEXT' ||
+              exceptionCheck.type === 'CERTIFICATION_CONTEXT'
+            ) {
+              // 장바구니/학술/인증 맥락 → 완전 필터링
+              continue;
             } else {
               continue;
             }
@@ -525,6 +610,18 @@ export class PatternMatcher {
    * 신뢰도 계산
    * ✅ 개선: 맥락 키워드 기반 가중치 추가
    */
+  /**
+   * 한글 자모 여부 판별 (가-힣 범위)
+   */
+  private isHangul(ch: string): boolean {
+    if (!ch) return false;
+    const code = ch.charCodeAt(0);
+    // 한글 완성형: 가(0xAC00) ~ 힣(0xD7A3)
+    // 한글 자모: ㄱ(0x3131) ~ ㅎ(0x3163), ㅏ(0x314F) ~ ㅣ(0x3163)
+    return (code >= 0xAC00 && code <= 0xD7A3) ||
+           (code >= 0x3131 && code <= 0x318E);
+  }
+
   private calculateConfidence(
     pattern: PatternDefinition,
     matchedText: string,
@@ -535,6 +632,24 @@ export class PatternMatcher {
     // 심각도에 따른 가중치
     if (pattern.severity === 'critical') confidence += 0.15;
     else if (pattern.severity === 'major') confidence += 0.1;
+
+    // ✅ v2.1: 한글 형태소 경계 검사 (짧은 한국어 키워드 substring 오매칭 방지)
+    // "광대가" → "대가" 매칭 시, 앞에 한글이 있으면 confidence 대폭 감소
+    if (matchedText.length <= 3) {
+      const ctxIdx = context.indexOf(matchedText);
+      if (ctxIdx > 0) {
+        const charBefore = context[ctxIdx - 1];
+        if (this.isHangul(charBefore)) {
+          confidence -= 0.4;
+        }
+      }
+      if (ctxIdx >= 0 && ctxIdx + matchedText.length < context.length) {
+        const charAfter = context[ctxIdx + matchedText.length];
+        if (this.isHangul(charAfter)) {
+          confidence -= 0.2;
+        }
+      }
+    }
 
     // 매칭 길이에 따른 가중치 (더 긴 매칭이 더 정확)
     if (matchedText.length > 10) confidence += 0.05;
@@ -646,6 +761,14 @@ export class PatternMatcher {
           case 'CONDITIONAL':
             // 조건문 앞에 있는지 확인
             matched = pattern.test(beforeText) || pattern.test(fullContext);
+            break;
+
+          case 'ECOMMERCE_CONTEXT':
+          case 'CITATION_CONTEXT':
+          case 'CERTIFICATION_CONTEXT':
+          case 'POST_PROCEDURE_CONTEXT':
+            // 전체 문장 맥락에서 확인
+            matched = pattern.test(fullContext);
             break;
         }
 
@@ -827,6 +950,27 @@ export class PatternMatcher {
    */
   private isInBroadcastTitle(context: string): boolean {
     return BROADCAST_TITLE_PATTERN.test(context);
+  }
+
+  /**
+   * URL 내부에 매칭이 있는지 체크
+   * http(s)://... 패턴 안에 포함된 매칭은 오탐
+   */
+  private isInsideUrl(text: string, start: number, end: number): boolean {
+    // 매칭 위치 앞쪽으로 스캔하여 http(s):// 시작 찾기
+    const lookback = Math.max(0, start - 300);
+    const before = text.slice(lookback, end);
+    // URL 패턴: 마지막 URL이 매칭 위치를 포함하는지
+    const urlRegex = /https?:\/\/[^\s)<>]+/g;
+    let urlMatch;
+    while ((urlMatch = urlRegex.exec(before)) !== null) {
+      const urlStart = lookback + urlMatch.index;
+      const urlEnd = urlStart + urlMatch[0].length;
+      if (start >= urlStart && end <= urlEnd) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**

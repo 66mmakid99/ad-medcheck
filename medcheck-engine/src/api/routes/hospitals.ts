@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import type { AppBindings } from '../../types/env';
 import { handleApiError } from '../../utils/error-handler';
 import { violationDetector } from '../../modules/violation-detector';
+import { contextAnalyzer } from '../../modules/ai-analyzer';
 import { runGeminiPipeline } from '../../services/analysis-pipeline';
 import type { GeminiPipelineResult } from '../../services/analysis-pipeline';
 import { saveCheckViolationResult } from '../../services/supabase-saver';
@@ -11,6 +12,80 @@ import {
   calculateCompositeConfidence,
 } from '../../services/result-classifier';
 import type { ViolationResult, Determination, DetectionSource } from '../../types';
+
+// 안내 사항(가격 · 제품/기술 최상급)은 등급에서 제외, 실제 위반만 등급 계산
+// 최상급 표현은 수식 대상에 따라 분리 판단:
+//   병원/의사 수식 → 위반 (등급 반영)
+//   제품/기술/성분 수식 → 안내 (근거 확인 권고)
+type AnalysisGrade = 'S' | 'A' | 'B' | 'C' | 'D' | 'F';
+const PRICE_ADVISORY_IDS = new Set([
+  'P-56-05-001', 'P-56-05-002', 'P-56-05-003',
+  'P-56-09-001', 'P-56-09-002', 'P-56-09-003',
+]);
+const SUPERLATIVE_IDS = new Set([
+  'P-56-03-001', 'P-56-03-002', 'P-56-03-003', 'P-56-03-004', 'P-56-03-005',
+]);
+const PRICE_ADVISORY_CATS = ['환자유인', '비급여', '할인'];
+
+// 최상급 표현이 병원/의사를 수식하는지 판별
+const HOSPITAL_MODIFIERS = /(?:병원|의원|클리닉|피부과|성형외과|치과|의사|원장|대표원장|전문의|진료|센터|한의원)/;
+const PRODUCT_MODIFIERS = /(?:톡신|필러|레이저|장비|기기|성분|약물|제품|기술|FDA|KFDA|식약처|CE|특허|승인|인증)/;
+
+function isSuperlativeAdvisory(v: { patternId?: string; context?: string; matchedText?: string }): boolean {
+  if (!v.patternId || !SUPERLATIVE_IDS.has(v.patternId)) return false;
+  const ctx = (v.context || '').replace(/\s+/g, ' ');
+  const matched = v.matchedText || '';
+  // 매칭 텍스트 주변 ±60자 확인
+  const idx = ctx.indexOf(matched);
+  const nearby = idx >= 0
+    ? ctx.slice(Math.max(0, idx - 60), Math.min(ctx.length, idx + matched.length + 60))
+    : ctx.slice(0, 200);
+  // 병원/의사 수식이면 위반 → advisory 아님
+  if (HOSPITAL_MODIFIERS.test(nearby)) return false;
+  // 제품/기술 수식이면 안내 → advisory
+  if (PRODUCT_MODIFIERS.test(nearby)) return true;
+  // 판별 불가 → 보수적으로 위반 처리
+  return false;
+}
+
+function isAdvisory(v: { patternId?: string; category?: string; type?: string; context?: string; matchedText?: string }): boolean {
+  // 가격 관련 → 항상 안내
+  if (v.patternId && PRICE_ADVISORY_IDS.has(v.patternId)) return true;
+  const cat = v.category || v.type || '';
+  if (PRICE_ADVISORY_CATS.some(k => cat.includes(k))) return true;
+  // 최상급 → 맥락 판별
+  if (v.patternId && SUPERLATIVE_IDS.has(v.patternId)) return isSuperlativeAdvisory(v);
+  if (cat.includes('최상급') || cat.includes('비교광고')) return isSuperlativeAdvisory(v);
+  return false;
+}
+
+function recalcGrade(violations: { severity: string; patternId?: string; category?: string; type?: string }[]): {
+  grade: AnalysisGrade; cleanScore: number; gradeDescription: string;
+  advisoryCount: number; scoredViolationCount: number;
+} {
+  const scored = violations.filter(v => !isAdvisory(v));
+  const counts = { critical: 0, high: 0, medium: 0, low: 0 };
+  let deduction = 0;
+  const deductionMap: Record<string, number> = { critical: 30, high: 20, medium: 10, low: 5 };
+  for (const v of scored) {
+    const sev = v.severity as keyof typeof counts;
+    if (sev in counts) counts[sev]++;
+    deduction += deductionMap[sev] || 5;
+  }
+  deduction = Math.min(100, deduction);
+  const cleanScore = Math.max(0, 100 - deduction);
+  let grade: AnalysisGrade;
+  if (counts.critical === 0 && counts.high === 0 && counts.medium === 0 && counts.low === 0) grade = 'S';
+  else if (counts.critical === 0 && counts.high === 0 && counts.medium <= 2) grade = 'A';
+  else if (counts.critical === 0 && counts.high <= 1) grade = 'B';
+  else if (counts.critical === 0) grade = 'C';
+  else if (counts.critical <= 2) grade = 'D';
+  else grade = 'F';
+  const descMap: Record<AnalysisGrade, string> = {
+    S: '위반 없음', A: '양호', B: '경미한 위반', C: '주의 필요', D: '다수 위반', F: '심각한 위반',
+  };
+  return { grade, cleanScore, gradeDescription: descMap[grade], advisoryCount: violations.length - scored.length, scoredViolationCount: scored.length };
+}
 
 const hospitalRoutes = new Hono<AppBindings>();
 
@@ -78,7 +153,7 @@ hospitalRoutes.get('/collected-hospitals', async (c) => {
 // Step 6: 응답 반환
 hospitalRoutes.post('/analyze-url', async (c) => {
   try {
-    const { url, hospitalId, hospitalName } = await c.req.json();
+    const { url, hospitalId, hospitalName, enableExtendedAnalysis, enableAI, metadata } = await c.req.json();
 
     if (!url) {
       return c.json({ success: false, error: { code: 'INVALID_INPUT', message: 'url 필드는 필수입니다.' } }, 400);
@@ -135,11 +210,60 @@ hospitalRoutes.post('/analyze-url', async (c) => {
     const fetchTimeMs = Date.now() - startTime;
 
     // ━━━━ Step 2: Rule Engine 실행 (항상) ━━━━
-    const ruleResult = violationDetector.analyze({ text: textContent, url: targetUrl });
+    const ruleResult = violationDetector.analyze({
+      text: textContent,
+      url: targetUrl,
+      enableExtendedAnalysis: enableExtendedAnalysis !== false, // default true
+      department: metadata?.department,
+    });
     const ruleTimeMs = Date.now() - startTime - fetchTimeMs;
 
+    // ━━━━ Step 2.5: ContextAnalyzer 맥락 검증 ━━━━
+    let contextFilteredViolations = ruleResult.judgment.violations;
+    let contextAnalyzerRan = false;
+
+    if (geminiApiKey && ruleResult.matches && ruleResult.matches.length > 0) {
+      try {
+        contextAnalyzer.configure({
+          provider: 'gemini',
+          apiKey: geminiApiKey,
+          confidenceThreshold: 0.6,
+          maxAIAnalysis: 10,
+        });
+
+        const ctxResult = await contextAnalyzer.analyze(
+          textContent,
+          ruleResult.matches,
+        );
+        contextAnalyzerRan = true;
+
+        // validateContext 결과로 오탐 제거
+        if (ctxResult.contextValidations) {
+          const invalidMatchIndices = new Set(
+            ctxResult.contextValidations
+              .map((cv, i) => ({ cv, i }))
+              .filter(({ cv }) => !cv.isLikelyViolation)
+              .map(({ i }) => i)
+          );
+          contextFilteredViolations = contextFilteredViolations.filter(
+            (_, i) => !invalidMatchIndices.has(i)
+          );
+        }
+
+        // intentAnalysis: 광고 의도가 낮으면 전체 confidence 감소
+        if (ctxResult.intentAnalysis && ctxResult.intentAnalysis.advertisingIntentProbability < 0.3) {
+          contextFilteredViolations = contextFilteredViolations.map(v => ({
+            ...v,
+            confidence: v.confidence * 0.6,
+          }));
+        }
+      } catch (ctxError: unknown) {
+        console.warn(`[analyze-url] ContextAnalyzer 실패: ${ctxError instanceof Error ? ctxError.message : String(ctxError)}`);
+      }
+    }
+
     // ━━━━ Step 3: 분류 (CONFIRMED / SAFE / AMBIGUOUS) ━━━━
-    const classification = classifyAnalysisResults(ruleResult.judgment.violations);
+    const classification = classifyAnalysisResults(contextFilteredViolations);
 
     // ━━━━ Step 4: AMBIGUOUS + Gemini 키 → AI 보강 ━━━━
     let finalViolations = classification.violations;
@@ -156,7 +280,8 @@ hospitalRoutes.post('/analyze-url', async (c) => {
       crossIntel?: unknown;
     } = {};
 
-    if (classification.needsAI && geminiApiKey) {
+    const shouldRunAI = (classification.needsAI || enableAI === true) && geminiApiKey && !contextAnalyzerRan;
+    if (shouldRunAI) {
       try {
         const geminiResult: GeminiPipelineResult = await runGeminiPipeline(
           {
@@ -226,10 +351,14 @@ hospitalRoutes.post('/analyze-url', async (c) => {
           ) / finalViolations.length
         : classification.avgConfidence;
 
-    // Supabase 저장 (best-effort)
+    // finalViolations 기반 등급 재계산
+    const finalGrade = recalcGrade(finalViolations);
+
+    // Supabase 저장 (best-effort) — 등급에 반영되는 위반만 severity 카운트
     let saved = false;
     if (c.env.SUPABASE_URL && c.env.SUPABASE_ANON_KEY) {
-      const severities = finalViolations.reduce(
+      const scoredViols = finalViolations.filter((v: any) => !isAdvisory(v));
+      const severities = scoredViols.reduce(
         (acc: { critical: number; major: number; minor: number }, v: { severity: string }) => {
           if (v.severity === 'critical' || v.severity === 'high') acc.critical++;
           else if (v.severity === 'medium' || v.severity === 'major') acc.major++;
@@ -244,9 +373,9 @@ hospitalRoutes.post('/analyze-url', async (c) => {
           hospital_id: hospitalId ? String(hospitalId) : undefined,
           hospital_name: hospitalName,
           url: targetUrl,
-          grade: ruleResult.judgment.score.grade,
-          clean_score: ruleResult.judgment.score.cleanScore ?? ruleResult.judgment.score.complianceRate ?? 0,
-          violation_count: finalViolations.length,
+          grade: finalGrade.grade,
+          clean_score: finalGrade.cleanScore,
+          violation_count: finalGrade.scoredViolationCount,
           critical_count: severities.critical,
           major_count: severities.major,
           minor_count: severities.minor,
@@ -258,6 +387,26 @@ hospitalRoutes.post('/analyze-url', async (c) => {
       saved = saveResult.saved;
     }
 
+    // Extended analysis data (from ViolationDetector)
+    const extendedData: Record<string, unknown> = {};
+    if (ruleResult.mandatoryCheck) {
+      extendedData.mandatoryCheck = ruleResult.mandatoryCheck;
+    }
+    if (ruleResult.impressionAnalysis) {
+      const ia = ruleResult.impressionAnalysis;
+      extendedData.impression = {
+        toneType: ia.toneAnalysis?.primaryTone ?? 'NEUTRAL',
+        aggressivenessScore: ia.toneAnalysis?.aggressiveness ?? 0,
+        credibilityScore: ia.credibilityAnalysis?.score ?? 50,
+        riskLevel: ia.riskLevel ?? 'LOW',
+        riskScore: ia.riskScore ?? 0,
+        complianceScore: ia.complianceScore ?? 100,
+      };
+    }
+    if (ruleResult.compoundViolations && ruleResult.compoundViolations.length > 0) {
+      extendedData.compoundViolations = ruleResult.compoundViolations;
+    }
+
     return c.json({
       success: true,
       data: {
@@ -266,13 +415,23 @@ hospitalRoutes.post('/analyze-url', async (c) => {
         hospitalId,
         hospitalName,
         inputLength: textContent.length,
-        violationCount: finalViolations.length,
+        violationCount: finalGrade.scoredViolationCount,
+        advisoryCount: finalGrade.advisoryCount,
         violations: finalViolations,
-        score: ruleResult.judgment.score,
-        grade: ruleResult.judgment.score.grade,
-        gradeDescription: ruleResult.judgment.score.gradeDescription,
+        score: { ...ruleResult.judgment.score, ...finalGrade },
+        grade: finalGrade.grade,
+        gradeDescription: finalGrade.gradeDescription,
         summary: ruleResult.judgment.summary,
         recommendations: ruleResult.judgment.recommendations,
+        // Extended analysis (mandatoryCheck, impression, compoundViolations)
+        ...extendedData,
+        // AI metadata
+        ai: analysisMode === 'rule_and_ai' ? {
+          enabled: true,
+          provider: 'gemini',
+          additionalViolations: geminiMeta.geminiOriginalCount ?? 0,
+          processingTimeMs: geminiMeta.geminiTimeMs ?? 0,
+        } : { enabled: false },
         // 기존 호환 필드
         analysisMode,
         processingTimeMs,
@@ -391,8 +550,52 @@ hospitalRoutes.post('/analyze-from-scv', async (c) => {
     const ruleResult = violationDetector.analyze({ text: combinedText, url: primaryUrl });
     const ruleTimeMs = Date.now() - startTime - fetchTimeMs;
 
+    // ━━━━ Step 2.5: ContextAnalyzer 맥락 검증 ━━━━
+    let contextFilteredViolations = ruleResult.judgment.violations;
+    let contextAnalyzerRan = false;
+
+    if (geminiApiKey && ruleResult.matches && ruleResult.matches.length > 0) {
+      try {
+        contextAnalyzer.configure({
+          provider: 'gemini',
+          apiKey: geminiApiKey,
+          confidenceThreshold: 0.6,
+          maxAIAnalysis: 10,
+        });
+
+        const ctxResult = await contextAnalyzer.analyze(
+          combinedText,
+          ruleResult.matches,
+        );
+        contextAnalyzerRan = true;
+
+        // validateContext 결과로 오탐 제거
+        if (ctxResult.contextValidations) {
+          const invalidMatchIndices = new Set(
+            ctxResult.contextValidations
+              .map((cv, i) => ({ cv, i }))
+              .filter(({ cv }) => !cv.isLikelyViolation)
+              .map(({ i }) => i)
+          );
+          contextFilteredViolations = contextFilteredViolations.filter(
+            (_, i) => !invalidMatchIndices.has(i)
+          );
+        }
+
+        // intentAnalysis: 광고 의도가 낮으면 전체 confidence 감소
+        if (ctxResult.intentAnalysis && ctxResult.intentAnalysis.advertisingIntentProbability < 0.3) {
+          contextFilteredViolations = contextFilteredViolations.map(v => ({
+            ...v,
+            confidence: v.confidence * 0.6,
+          }));
+        }
+      } catch (ctxError: unknown) {
+        console.warn(`[analyze-from-scv] ContextAnalyzer 실패: ${ctxError instanceof Error ? ctxError.message : String(ctxError)}`);
+      }
+    }
+
     // ━━━━ Step 3: 분류 ━━━━
-    const classification = classifyAnalysisResults(ruleResult.judgment.violations);
+    const classification = classifyAnalysisResults(contextFilteredViolations);
 
     // ━━━━ Step 4: AMBIGUOUS + Gemini → AI 보강 ━━━━
     let finalViolations = classification.violations;
@@ -400,7 +603,7 @@ hospitalRoutes.post('/analyze-from-scv', async (c) => {
     let analysisMode: DetectionSource = 'rule_only';
     let geminiMeta: Record<string, unknown> = {};
 
-    if (classification.needsAI && geminiApiKey) {
+    if (classification.needsAI && geminiApiKey && !contextAnalyzerRan) {
       try {
         const geminiResult: GeminiPipelineResult = await runGeminiPipeline(
           {
@@ -449,8 +652,12 @@ hospitalRoutes.post('/analyze-from-scv', async (c) => {
         ? finalViolations.reduce((sum, v) => sum + (v.compositeConfidence ?? v.confidence), 0) / finalViolations.length
         : classification.avgConfidence;
 
+    // finalViolations 기반 등급 재계산
+    const finalGrade2 = recalcGrade(finalViolations);
+
     let saved = false;
-    const severities = finalViolations.reduce(
+    const scoredViols2 = finalViolations.filter((v: any) => !isAdvisory(v));
+    const severities = scoredViols2.reduce(
       (acc: { critical: number; major: number; minor: number }, v: { severity: string }) => {
         if (v.severity === 'critical' || v.severity === 'high') acc.critical++;
         else if (v.severity === 'medium' || v.severity === 'major') acc.major++;
@@ -465,9 +672,9 @@ hospitalRoutes.post('/analyze-from-scv', async (c) => {
         hospital_id: String(hospitalId),
         hospital_name: hospitalName,
         url: primaryUrl,
-        grade: ruleResult.judgment.score.grade,
-        clean_score: ruleResult.judgment.score.cleanScore ?? ruleResult.judgment.score.complianceRate ?? 0,
-        violation_count: finalViolations.length,
+        grade: finalGrade2.grade,
+        clean_score: finalGrade2.cleanScore,
+        violation_count: finalGrade2.scoredViolationCount,
         critical_count: severities.critical,
         major_count: severities.major,
         minor_count: severities.minor,
@@ -489,11 +696,12 @@ hospitalRoutes.post('/analyze-from-scv', async (c) => {
         pagesAnalyzed: pagesSummary.length,
         pagesSummary,
         inputLength: combinedText.length,
-        violationCount: finalViolations.length,
+        violationCount: finalGrade2.scoredViolationCount,
+        advisoryCount: finalGrade2.advisoryCount,
         violations: finalViolations,
-        score: ruleResult.judgment.score,
-        grade: ruleResult.judgment.score.grade,
-        gradeDescription: ruleResult.judgment.score.gradeDescription,
+        score: { ...ruleResult.judgment.score, ...finalGrade2 },
+        grade: finalGrade2.grade,
+        gradeDescription: finalGrade2.gradeDescription,
         summary: ruleResult.judgment.summary,
         recommendations: ruleResult.judgment.recommendations,
         analysisMode,

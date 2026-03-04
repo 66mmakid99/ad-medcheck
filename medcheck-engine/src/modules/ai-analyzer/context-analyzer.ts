@@ -134,6 +134,14 @@ const NON_ADVERTISING_PATTERNS: Array<{ pattern: RegExp; signal: string; weight:
   { pattern: /(개인\s*차이|결과가\s*다를|보장하지\s*않)/gi, signal: 'disclaimer', weight: -0.2 },
   { pattern: /(교육|설명|안내)\s*(자료|목적)/gi, signal: 'educational_purpose', weight: -0.15 },
   { pattern: /(기자|뉴스|보도|언론)/gi, signal: 'news_article', weight: -0.15 },
+  // v2.1: 가격 고지 (정당한 가격 정보 제공)
+  { pattern: /(정가|수가|건강보험|급여|비급여)\s*(안내|기준|표)/gi, signal: 'price_notice', weight: -0.15 },
+  { pattern: /비급여\s*진료비\s*(?:안내|고지|공지)/gi, signal: 'price_disclosure', weight: -0.2 },
+  // v2.1: FAQ/QnA 형식
+  { pattern: /(?:자주\s*묻는\s*질문|FAQ|Q\s*&\s*A|Q\.\s*\S+.*A\.)/gi, signal: 'faq_format', weight: -0.15 },
+  // v2.1: 의료 정보 제공 목적
+  { pattern: /(증상|원인|치료\s*방법|진단)\s*(안내|소개|설명)/gi, signal: 'medical_info', weight: -0.15 },
+  { pattern: /(수술|시술)\s*후\s*(주의|관리|회복|안내)/gi, signal: 'post_procedure_guide', weight: -0.2 },
 ];
 
 /**
@@ -680,6 +688,11 @@ export class ContextAnalyzer {
     const sentenceEnd = this.findSentenceEnd(text, matchEnd);
     const sentence = text.slice(sentenceStart, sentenceEnd);
 
+    // 주변 맥락 (넓은 범위)
+    const wideStart = Math.max(0, matchStart - 200);
+    const wideEnd = Math.min(text.length, matchEnd + 200);
+    const wideContext = text.slice(wideStart, wideEnd);
+
     // 면책 조항 검사
     const disclaimerPatterns = [
       /개인\s*(?:마다\s*)?(?:차이|결과)/,
@@ -728,6 +741,26 @@ export class ContextAnalyzer {
     if (hasObjectiveEvidence) confidenceAdjustment -= 0.1;
     if (usesConditionalLanguage) confidenceAdjustment -= 0.1;
 
+    // ✅ v2.1: 장바구니/UI 요소 감지
+    if (/(?:장바구니|cart|총\s*\d+\s*개\s*시술|결제\s*하기|주문\s*내역|선택\s*시술)/i.test(wideContext)) {
+      confidenceAdjustment -= 0.5;
+    }
+
+    // ✅ v2.1: 학술인용 맥락 감지
+    if (/(?:Vol\.?\s*\d+|PMID|et\s+al|논문|저널|journal|학술지)/i.test(wideContext)) {
+      confidenceAdjustment -= 0.4;
+    }
+
+    // ✅ v2.1: 의료기기/인증 정당 사용 감지
+    if (/(?:FDA|KFDA|식약처|CE|ISO|MFDS)\s*(?:승인|인증|허가|등록)/i.test(wideContext)) {
+      confidenceAdjustment -= 0.3;
+    }
+
+    // ✅ v2.1: 수술 후 안내문 감지
+    if (/(?:수술|시술)\s*후\s*(?:관리|안내|주의|회복)|(?:관리\s*방법|주의\s*사항|회복\s*기간)/i.test(wideContext)) {
+      confidenceAdjustment -= 0.25;
+    }
+
     // 강화 요소 (위반 가능성 증가)
     if (/(?:100%|완벽|확실|틀림없)/i.test(sentence)) confidenceAdjustment += 0.2;
     if (/(?:보장|약속)/i.test(sentence)) confidenceAdjustment += 0.15;
@@ -750,6 +783,18 @@ export class ContextAnalyzer {
       }
       if (usesConditionalLanguage) {
         reasoning += ' (조건부 표현 사용)';
+      }
+      if (/장바구니|cart|결제/i.test(wideContext)) {
+        reasoning += ' (장바구니/UI 맥락)';
+      }
+      if (/Vol\.|PMID|논문|학술/i.test(wideContext)) {
+        reasoning += ' (학술인용 맥락)';
+      }
+      if (/FDA|식약처|CE|ISO/i.test(wideContext)) {
+        reasoning += ' (인증 정보 맥락)';
+      }
+      if (/수술\s*후|시술\s*후|관리\s*방법|주의\s*사항/i.test(wideContext)) {
+        reasoning += ' (수술 후 안내 맥락)';
       }
     }
 

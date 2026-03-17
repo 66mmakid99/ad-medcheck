@@ -1,0 +1,99 @@
+name: AD-MEDCHECK CI
+
+on:
+  push:
+    branches: [master, main, develop]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  engine:
+    name: engine · typecheck · test · audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: medcheck-engine
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: medcheck-engine/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Step 1: TypeScript 타입 체크 ────────────────────────────────
+      - name: TypeScript (tsc --noEmit)
+        run: npx tsc --noEmit
+
+      # ── Step 2: esbuild 번들 빌드 ───────────────────────────────────
+      - name: Build (esbuild)
+        run: npm run build
+        env:
+          # esbuild 번들 — CF 인증 불필요
+          CLOUDFLARE_API_TOKEN: placeholder
+
+      # ── Step 3: Vitest 단위 테스트 ──────────────────────────────────
+      - name: Vitest unit tests
+        run: npm test
+        env:
+          # 테스트는 실제 외부 서비스 불필요 — mock으로 처리됨
+          SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_SERVICE_ROLE_KEY: placeholder_key
+          ANTHROPIC_API_KEY: placeholder_key
+          GOOGLE_AI_API_KEY: placeholder_key
+
+      # ── Step 4: Security Audit ──────────────────────────────────────
+      - name: npm audit (high+critical only)
+        run: npm audit --audit-level=high
+        continue-on-error: false
+
+      # ── 결과 요약 ──────────────────────────────────────────────────
+      - name: Summary
+        if: always()
+        run: |
+          echo "## AD-MEDCHECK Engine CI 결과" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| 단계 | 내용 |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|------|" >> $GITHUB_STEP_SUMMARY
+          echo "| tsc | TypeScript 타입 체크 |" >> $GITHUB_STEP_SUMMARY
+          echo "| esbuild | 번들 빌드 |" >> $GITHUB_STEP_SUMMARY
+          echo "| vitest | 단위 테스트 (91건+) |" >> $GITHUB_STEP_SUMMARY
+          echo "| npm audit | 보안 취약점 |" >> $GITHUB_STEP_SUMMARY
+
+  dashboard:
+    name: dashboard · build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: medcheck-dashboard
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: medcheck-dashboard/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Vite 빌드 ──────────────────────────────────────────────────
+      - name: Build dashboard (vite)
+        run: npm run build
+        env:
+          VITE_SUPABASE_URL: https://placeholder.supabase.co
+          VITE_SUPABASE_ANON_KEY: placeholder_key
+          VITE_ADMIN_API_KEY: placeholder_key

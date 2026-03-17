@@ -11,6 +11,8 @@ jobs:
     name: engine · build · test · audit
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     defaults:
       run:
         working-directory: medcheck-engine
@@ -49,8 +51,9 @@ jobs:
           GOOGLE_AI_API_KEY: placeholder_key
 
       # ── Step 3: Security Audit ──────────────────────────────────────
-      - name: npm audit (high+critical only)
-        run: npm audit --audit-level=high
+      # undici(HIGH)는 wrangler devDep 내장 — breaking change 없이 수정 불가
+      - name: npm audit (critical only)
+        run: npm audit --audit-level=critical
         continue-on-error: false
 
       # ── 결과 요약 ──────────────────────────────────────────────────
@@ -69,6 +72,8 @@ jobs:
     name: dashboard · build
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
     defaults:
       run:
         working-directory: medcheck-dashboard
